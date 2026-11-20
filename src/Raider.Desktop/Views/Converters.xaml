@@ -1,0 +1,12 @@
+<ResourceDictionary xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+                    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+                    xmlns:local="clr-namespace:Raider.Desktop"
+                    xmlns:sys="clr-namespace:System;assembly=mscorlib">
+
+    <local:InverseBooleanConverter x:Key="InverseBooleanConverter" />
+    <local:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+
+    <!-- Converts DateTimeOffset to local time string -->
+    <local:DateTimeOffsetToStringConverter x:Key="DateTimeOffsetToStringConverter" />
+
+</ResourceDictionary>

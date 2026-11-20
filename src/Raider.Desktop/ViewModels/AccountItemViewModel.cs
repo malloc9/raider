@@ -2,6 +2,7 @@ namespace Raider.Desktop.ViewModels;
 
 using System.Collections.ObjectModel;
 using CommunityToolkit.Mvvm.ComponentModel;
+using CommunityToolkit.Mvvm.Input;
 using Raider.Core.Models;
 
 /// <summary>
@@ -16,7 +17,7 @@ public sealed partial class AccountItemViewModel : ObservableObject
         _routineChanged = routineChanged;
         Id = account.Id;
         PlariumLogin = account.PlariumLogin;
-        DisplayName = account.DisplayName;
+        _displayName = account.DisplayName;
 
         // Show every Chore; the ones in the Account's Routine are ticked, in Routine order first
         var enabled = account.Routine.Chores;
@@ -32,7 +33,8 @@ public sealed partial class AccountItemViewModel : ObservableObject
 
     public string PlariumLogin { get; }
 
-    public string DisplayName { get; }
+    [ObservableProperty]
+    private string _displayName;
 
     public ObservableCollection<ChoreToggleViewModel> Chores { get; }
 
@@ -49,6 +51,14 @@ public sealed partial class AccountItemViewModel : ObservableObject
         new Routine(Chores.Where(c => c.IsEnabled).Select(c => c.Chore).ToList()));
 
     private void OnChoreToggled() => _routineChanged();
+
+    [RelayCommand]
+    private void Rename()
+    {
+        // The rename is done by editing the DisplayName property directly
+        // This command exists for the button binding
+        _routineChanged();
+    }
 }
 
 /// <summary>
