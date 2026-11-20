@@ -19,6 +19,7 @@ export const IPC_CHANNELS = {
 
   // Runs
   'run:start': 'run:start',
+  'run:chore': 'run:chore',
   'run:cancel': 'run:cancel',
   'run:progress': 'run:progress',
   'run:complete': 'run:complete'
@@ -38,5 +39,7 @@ export type RoutineToggleChoreRequest = { accountId: string; choreId: ChoreId; e
 
 export type RunStartRequest = { accountId: string };
 export type RunStartResponse = { runId: string };
+export type RunChoreRequest = { accountId: string; choreId: ChoreId };
+export type RunChoreResponse = { runId: string };
 export type RunProgressEvent = { runId: string; choreId: ChoreId; result: any };
 export type RunCompleteEvent = { runId: string; run: Run };
