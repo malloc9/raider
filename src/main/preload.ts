@@ -6,6 +6,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import type { Account, Routine, RoutineChore, ChoreId, Run } from '../shared/types';
 import type { InstallCheckResult, InstallOperationResult } from '../shared/types';
 import { IPC_CHANNELS, type AccountCreateRequest, type AccountDeleteRequest, type AccountRenameRequest, type RoutineGetRequest, type RoutineUpdateRequest, type RoutineReorderRequest, type RoutineToggleChoreRequest, type RunStartRequest, type RunProgressEvent, type RunCompleteEvent, type InstallerSetGamePathRequest } from './ipc';
+import { IPC_CHANNELS, type AccountCreateRequest, type AccountDeleteRequest, type AccountRenameRequest, type RoutineGetRequest, type RoutineUpdateRequest, type RoutineReorderRequest, type RoutineToggleChoreRequest, type RunStartRequest, type RunChoreRequest, type RunProgressEvent, type RunCompleteEvent } from './ipc';
 
 contextBridge.exposeInMainWorld('raiderAPI', {
   // Accounts
@@ -27,6 +28,7 @@ contextBridge.exposeInMainWorld('raiderAPI', {
   // Runs
   run: {
     start: (accountId: string): Promise<{ runId: string }> => ipcRenderer.invoke(IPC_CHANNELS['run:start'], { accountId } as RunStartRequest),
+    chore: (accountId: string, choreId: ChoreId): Promise<{ runId: string }> => ipcRenderer.invoke(IPC_CHANNELS['run:chore'], { accountId, choreId } as RunChoreRequest),
     cancel: (runId: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS['run:cancel'], { runId }),
     onProgress: (callback: (event: RunProgressEvent) => void) => {
       ipcRenderer.on(IPC_CHANNELS['run:progress'], (_e, event) => callback(event));

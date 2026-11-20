@@ -263,6 +263,30 @@
       text-align: right;
     }
 
+    .run-chore-btn {
+      background: #0f3460;
+      border: 1px solid #1a1a2e;
+      color: #eaeaea;
+      padding: 0.25rem 0.5rem;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      min-width: 28px;
+    }
+
+    .run-chore-btn:hover:not(:disabled) {
+      background: #1a1a2e;
+      color: #e94560;
+    }
+
+    .run-chore-btn:disabled {
+      opacity: 0.4;
+      cursor: not-allowed;
+    }
+
     /* Run panel */
     #run-panel {
       width: 320px;
