@@ -23,6 +23,7 @@ public sealed record ChoreResult(
     ChoreOutcome Outcome,
     string? ErrorMessage = null,
     string? SnapshotPath = null,
+    object? Data = null,
     DateTimeOffset StartedAt = default,
     DateTimeOffset CompletedAt = default,
     int GemsCollected = 0
@@ -40,4 +41,12 @@ public sealed record ChoreResult(
     
     public static ChoreResult BrokenByGameUpdate(Chore chore, string errorMessage, string? snapshotPath, DateTimeOffset startedAt, DateTimeOffset completedAt) =>
         new(chore, ChoreOutcome.BrokenByGameUpdate, errorMessage, snapshotPath, startedAt, completedAt, 0);
+    public static ChoreResult Success(Chore chore, DateTimeOffset startedAt, DateTimeOffset completedAt, object? data = null) =>
+        new(chore, ChoreOutcome.Success, null, null, data, startedAt, completedAt);
+    
+    public static ChoreResult Failed(Chore chore, string errorMessage, string? snapshotPath, DateTimeOffset startedAt, DateTimeOffset completedAt) =>
+        new(chore, ChoreOutcome.Failed, errorMessage, snapshotPath, null, startedAt, completedAt);
+    
+    public static ChoreResult BrokenByGameUpdate(Chore chore, string errorMessage, string? snapshotPath, DateTimeOffset startedAt, DateTimeOffset completedAt) =>
+        new(chore, ChoreOutcome.BrokenByGameUpdate, errorMessage, snapshotPath, null, startedAt, completedAt);
 }

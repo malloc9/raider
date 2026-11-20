@@ -72,6 +72,8 @@ public sealed class RunOrchestrator
             {
                 choreResult = ChoreResult.Success(chore, choreStartedAt, choreCompletedAt, executionResult.GemsCollected);
                 _logger.LogInformation("Chore {ChoreId} succeeded with {GemsCollected} gems collected", chore.Id, executionResult.GemsCollected);
+                choreResult = ChoreResult.Success(chore, choreStartedAt, choreCompletedAt, executionResult.Data);
+                _logger.LogInformation("Chore {ChoreId} succeeded", chore.Id);
             }
             else
             {
@@ -89,6 +91,7 @@ public sealed class RunOrchestrator
                     chore,
                     outcome,
                     executionResult.ErrorMessage,
+                    null,
                     null,
                     choreStartedAt,
                     choreCompletedAt,
