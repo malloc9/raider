@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Raider.Core.Models;
+using Raider.Core.Ports;
 using Raider.Core.Services;
 using Raider.Desktop.Services;
 using Raider.Desktop.ViewModels;
