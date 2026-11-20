@@ -143,11 +143,12 @@ public sealed partial class InstancesAndAccountsViewModel : ObservableObject
                 // Re-mark duplicates
                 MarkDuplicateInstances();
 
-                // Refresh account names for all instances
-                foreach (var instanceVm in Instances)
-                {
-                    await instanceVm.RefreshAccountNameAsync();
-                }
+            }
+
+            // Refresh account names outside the lock (it awaits)
+            foreach (var instanceVm in Instances.ToList())
+            {
+                await instanceVm.RefreshAccountNameAsync();
             }
 
             StatusMessage = $"Found {Instances.Count} instance(s)";

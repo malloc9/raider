@@ -102,7 +102,7 @@ public sealed partial class InstanceViewModel : ObservableObject
     public bool CanRunNow => State is InstanceState.Idle or InstanceState.Failed or InstanceState.DoneToday;
 
     [RelayCommand(CanExecute = nameof(CanRunNow))]
-    private async Task RunNowAsync()
+    internal async Task RunNowAsync()
     {
         if (AccountId == null)
         {
@@ -138,21 +138,8 @@ public sealed partial class InstanceViewModel : ObservableObject
             LastRunCompletedAt = DateTimeOffset.UtcNow;
             LastRunStatus = run.Status;
             
-            if (run.Status == RunStatus.Completed)
-            {
-                State = run.HasFailures ? InstanceState.Failed : InstanceState.DoneToday;
-                LastRunMessage = $"Done: {run.SuccessCount} ok, {run.FailureCount} failed";
-            }
-            else if (run.Status == RunStatus.NeedsManualLogin)
-            {
-                State = InstanceState.Failed;
-                LastRunMessage = "Needs manual login in Plarium Play";
-            }
-            else
-            {
-                State = InstanceState.Failed;
-                LastRunMessage = run.StatusMessage ?? "Account switch failed";
-            }
+            State = run.HasFailures ? InstanceState.Failed : InstanceState.DoneToday;
+            LastRunMessage = $"Done: {run.SuccessCount} ok, {run.FailureCount} failed";
         }
         catch (OperationCanceledException)
         {
