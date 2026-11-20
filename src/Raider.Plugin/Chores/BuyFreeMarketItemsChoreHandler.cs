@@ -34,19 +34,21 @@ internal sealed class BuyFreeMarketItemsChoreHandler : IChoreHandler
         }
 
         var commands = new List<PlannedCommand>();
+        var seen = new List<object>();
         foreach (var item in items)
         {
-            if (!IsFree(Get(item, "Price")))
-            {
-                continue;
-            }
-
             var id = Convert.ToInt32(Get(item, "Id"));
             var type = Get(item, "TypeId")?.ToString();
-            commands.Add(new PlannedCommand(Buy, new object?[] { id }, new { itemId = id, type }, () => RecheckFree(id)));
+            var price = Get(item, "Price");
+            var free = IsFree(price);
+            seen.Add(new { itemId = id, type, price = DescribePrice(price), free });
+            if (free)
+            {
+                commands.Add(new PlannedCommand(Buy, new object?[] { id }, new { itemId = id, type }, () => RecheckFree(id)));
+            }
         }
 
-        var details = new { marketItems = items.Count };
+        var details = new { marketItems = seen };
         return commands.Count == 0 ? ChorePlan.Nothing("NoFreeItems", details) : new ChorePlan(commands, "", details);
     }
 
@@ -61,6 +63,29 @@ internal sealed class BuyFreeMarketItemsChoreHandler : IChoreHandler
         }
 
         return IsFree(Get(item, "Price")) ? null : "the item is no longer free";
+    }
+
+    /// <summary>The price's non-zero resources, e.g. "Silver=25000", for the report.</summary>
+    private static string DescribePrice(object? price)
+    {
+        if (price == null)
+        {
+            return "none";
+        }
+
+        try
+        {
+            var parts = Items(Get(price, "RawValues"))
+                .Select(entry => (resource: Get(entry, "Key")?.ToString(), amount: Convert.ToDouble(Get(entry, "Value"))))
+                .Where(p => p.amount != 0)
+                .Select(p => $"{p.resource}={p.amount}");
+            var text = string.Join(", ", parts);
+            return text.Length == 0 ? "zero" : text;
+        }
+        catch (Exception ex)
+        {
+            return $"unreadable ({ex.Message})";
+        }
     }
 
     private static bool IsFree(object? price)
