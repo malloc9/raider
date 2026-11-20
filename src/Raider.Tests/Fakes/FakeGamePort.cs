@@ -51,7 +51,7 @@ public sealed class FakeGamePort : IGamePort
         }
         
         // Default to success if not configured
-        return Task.FromResult(new ChoreExecutionResult(true));
+        return Task.FromResult(new ChoreExecutionResult(true, null, 0));
     }
 
     public Task<string> GetGameStateJsonAsync(CancellationToken cancellationToken = default)
