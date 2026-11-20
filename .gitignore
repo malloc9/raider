@@ -1,0 +1,43 @@
+# Build outputs
+bin/
+obj/
+**/bin/
+**/obj/
+
+# IDE
+.vs/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# User secrets
+**/secrets.json
+**/appsettings.*.json
+!**/appsettings.json
+
+# Test results
+TestResults/
+*.trx
+
+# Raider specific
+# Interop assemblies generated from local game install - never committed
+src/Raider.Plugin/Interop/
+src/Raider.Plugin/*/Interop/
+
+# BepInEx bundled runtime (downloaded at build time)
+src/Raider.Desktop/BepInEx/
+src/Raider.Desktop/Plugins/
+
+# Published output
+publish/
+
+# Logs
+*.log
+logs/
+
+# Plarium Play game data (local testing)
+GameData/

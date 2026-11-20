@@ -70,10 +70,8 @@ public sealed class RunOrchestrator
 
             if (executionResult.Success)
             {
-                choreResult = ChoreResult.Success(chore, choreStartedAt, choreCompletedAt, executionResult.GemsCollected);
+                choreResult = ChoreResult.Success(chore, choreStartedAt, choreCompletedAt, executionResult.GemsCollected, executionResult.Data);
                 _logger.LogInformation("Chore {ChoreId} succeeded with {GemsCollected} gems collected", chore.Id, executionResult.GemsCollected);
-                choreResult = ChoreResult.Success(chore, choreStartedAt, choreCompletedAt, executionResult.Data);
-                _logger.LogInformation("Chore {ChoreId} succeeded", chore.Id);
             }
             else
             {

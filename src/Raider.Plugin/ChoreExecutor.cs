@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using BepInEx.Logging;
 using Raider.Plugin.Chores;
+using Raider.Plugin.Game;
 
 /// <summary>
 /// Executes chores and handles IPC communication with the desktop app.
@@ -24,8 +25,10 @@ internal sealed class ChoreExecutor
         {
             { "ClanCheckIn", new ClanCheckInChoreHandler() },
             { "CollectInbox", new CollectInboxChoreHandler() },
-            // Other chore handlers will be added here
             { "BuyFreeMarketItems", new BuyFreeMarketItemsChoreHandler() },
+            { "CollectGemMine", new CollectGemMineChoreHandler() },
+            { "ClaimPlaytimeRewards", new ClaimPlaytimeRewardsChoreHandler() },
+            { "ClaimQuests", new ClaimQuestsChoreHandler() },
         };
     }
 
@@ -38,7 +41,7 @@ internal sealed class ChoreExecutor
             return;
 
         _httpListener = new HttpListener();
-        _httpListener.Prefixes.Add("http://localhost:51837/raider/");
+        _httpListener.Prefixes.Add("http://localhost:51838/raider/");
         
         try
         {
@@ -46,7 +49,7 @@ internal sealed class ChoreExecutor
             _isRunning = true;
             _listenerThread = new Thread(ListenLoop) { IsBackground = true };
             _listenerThread.Start();
-            _log.LogInfo("IPC server started on http://localhost:51837/raider/");
+            _log.LogInfo("IPC server started on http://localhost:51838/raider/");
         }
         catch (Exception ex)
         {
@@ -81,7 +84,6 @@ internal sealed class ChoreExecutor
             }
             catch (HttpListenerException) when (!_isRunning)
             {
-                // Expected when stopping
                 break;
             }
             catch (Exception ex)
@@ -98,17 +100,26 @@ internal sealed class ChoreExecutor
 
         try
         {
-            if (request.HttpMethod == "POST" && request.Url?.AbsolutePath == "/raider/execute-chore")
+            switch (request.HttpMethod)
             {
-                await HandleExecuteChoreAsync(request, response);
-            }
-            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/health")
-            {
-                await WriteResponseAsync(response, 200, new { status = "ok" });
-            }
-            else
-            {
-                await WriteResponseAsync(response, 404, new { error = "Not found" });
+                case "GET" when request.Url?.AbsolutePath == "/raider/game-build":
+                    await HandleGetGameBuildAsync(response);
+                    break;
+                case "GET" when request.Url?.AbsolutePath == "/raider/game-state":
+                    await HandleGetGameStateAsync(response);
+                    break;
+                case "GET" when request.Url?.AbsolutePath?.StartsWith("/raider/plugin-log") == true:
+                    await HandleGetPluginLogAsync(request, response);
+                    break;
+                case "POST" when request.Url?.AbsolutePath == "/raider/execute-chore":
+                    await HandleExecuteChoreAsync(request, response);
+                    break;
+                case "POST" when request.Url?.AbsolutePath == "/raider/switch-account":
+                    await HandleSwitchAccountAsync(request, response);
+                    break;
+                default:
+                    await WriteResponseAsync(response, 404, new { error = "Not found" });
+                    break;
             }
         }
         catch (Exception ex)
@@ -116,6 +127,37 @@ internal sealed class ChoreExecutor
             _log.LogError($"Error handling request: {ex.Message}");
             await WriteResponseAsync(response, 500, new { error = ex.Message });
         }
+    }
+
+    private async Task HandleGetGameBuildAsync(HttpListenerResponse response)
+    {
+        var gameBuild = GameAccess.GetGameBuild();
+        await WriteResponseAsync(response, 200, new { gameBuild });
+    }
+
+    private async Task HandleGetGameStateAsync(HttpListenerResponse response)
+    {
+        // Return basic game state as JSON
+        var state = new
+        {
+            isInGame = GameAccess.IsInGame(),
+            gameBuild = GameAccess.GetGameBuild(),
+            timestamp = DateTimeOffset.UtcNow.ToString("O")
+        };
+        await WriteResponseAsync(response, 200, new { state = JsonSerializer.Serialize(state, JsonOptions.Default) });
+    }
+
+    private async Task HandleGetPluginLogAsync(HttpListenerRequest request, HttpListenerResponse response)
+    {
+        var maxLines = 50;
+        if (request.QueryString["maxLines"] is string maxLinesStr && int.TryParse(maxLinesStr, out var parsed))
+        {
+            maxLines = parsed;
+        }
+
+        // Return recent log entries (simplified for now)
+        var log = $"[Plugin] Log excerpt requested ({maxLines} lines)\n[Plugin] Plugin version: {PluginInfo.PLUGIN_VERSION}\n[Plugin] Game build: {GameAccess.GetGameBuild()}\n[Plugin] In-game: {GameAccess.IsInGame()}";
+        await WriteResponseAsync(response, 200, new { log });
     }
 
     private async Task HandleExecuteChoreAsync(HttpListenerRequest request, HttpListenerResponse response)
@@ -140,14 +182,33 @@ internal sealed class ChoreExecutor
 
         var result = await handler.ExecuteAsync(choreRequest.Parameters);
         
-        var choreResponse = new ChoreExecutionResponse
+        var choreResponse = new ExecuteChoreResponse
         {
             Success = result.Success,
             ErrorMessage = result.ErrorMessage,
+            GemsCollected = result.Data is int gems ? gems : 0,
             Data = result.Data
         };
 
         await WriteResponseAsync(response, 200, choreResponse);
+    }
+
+    private async Task HandleSwitchAccountAsync(HttpListenerRequest request, HttpListenerResponse response)
+    {
+        using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
+        var requestJson = await reader.ReadToEndAsync();
+
+        var switchRequest = JsonSerializer.Deserialize<SwitchAccountRequest>(requestJson, JsonOptions.Default);
+        if (switchRequest == null || string.IsNullOrEmpty(switchRequest.PlariumLogin))
+        {
+            await WriteResponseAsync(response, 400, new { error = "Invalid request" });
+            return;
+        }
+
+        _log.LogInfo($"Switch account requested: {switchRequest.PlariumLogin}");
+        // Account switching is handled by the desktop app via Plarium Play automation
+        // The plugin just acknowledges the request
+        await WriteResponseAsync(response, 200, new { success = true, message = "Account switch acknowledged" });
     }
 
     private static async Task WriteResponseAsync(HttpListenerResponse response, int statusCode, object data)
@@ -191,11 +252,20 @@ internal sealed class ChoreExecutionRequest
 /// <summary>
 /// Response from chore execution via IPC.
 /// </summary>
-internal sealed class ChoreExecutionResponse
+internal sealed class ExecuteChoreResponse
 {
     public bool Success { get; set; }
     public string? ErrorMessage { get; set; }
+    public int GemsCollected { get; set; }
     public object? Data { get; set; }
+}
+
+/// <summary>
+/// Request to switch account.
+/// </summary>
+internal sealed class SwitchAccountRequest
+{
+    public string PlariumLogin { get; set; } = string.Empty;
 }
 
 /// <summary>
