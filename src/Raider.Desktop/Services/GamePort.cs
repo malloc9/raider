@@ -45,7 +45,8 @@ public sealed class GamePort : IGamePort
         return new ChoreExecutionResult(
             response.Success,
             response.ErrorMessage,
-            response.GemsCollected);
+            response.GemsCollected,
+            response.Data);
     }
 
     public async Task<string> GetGameStateJsonAsync(CancellationToken cancellationToken = default)

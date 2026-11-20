@@ -39,6 +39,6 @@ public interface IGamePort
 public sealed record ChoreExecutionResult(
     bool Success,
     string? ErrorMessage = null,
-    int GemsCollected = 0
+    int GemsCollected = 0,
     object? Data = null
 );

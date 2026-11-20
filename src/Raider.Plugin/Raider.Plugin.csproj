@@ -13,7 +13,6 @@
     <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
     <PackageReference Include="System.Text.Json" Version="8.0.0" />
     <PackageReference Include="UnityEngine.Modules" Version="2022.3.20" PrivateAssets="all" IncludeAssets="compile" />
-    <PackageReference Include="System.Text.Json" Version="8.0.0" />
   </ItemGroup>
 
 </Project>
