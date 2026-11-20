@@ -22,10 +22,11 @@ internal sealed class ChoreExecutor
         _log = RaiderPlugin.Log;
         _choreHandlers = new Dictionary<string, IChoreHandler>(StringComparer.OrdinalIgnoreCase)
         {
+            { "ClaimPlaytimeRewards", new ClaimPlaytimeRewardsChoreHandler() },
             { "ClanCheckIn", new ClanCheckInChoreHandler() },
             { "CollectInbox", new CollectInboxChoreHandler() },
-            // Other chore handlers will be added here
             { "BuyFreeMarketItems", new BuyFreeMarketItemsChoreHandler() },
+            // Other chore handlers will be added here
         };
     }
 
