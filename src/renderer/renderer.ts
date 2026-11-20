@@ -21,6 +21,7 @@ interface RaiderAPI {
   };
   run: {
     start: (accountId: string) => Promise<{ runId: string }>;
+    chore: (accountId: string, choreId: ChoreId) => Promise<{ runId: string }>;
     cancel: (runId: string) => Promise<void>;
     onProgress: (callback: (event: any) => void) => () => void;
     onComplete: (callback: (event: any) => void) => void;
@@ -152,6 +153,7 @@ function renderChoreList() {
         <div class="chore-description">${escapeHtml(def.description)}</div>
       </div>
       <span class="chore-order">${routineChore.order + 1}</span>
+      <button class="btn-icon run-chore-btn" title="Run this chore" data-chore-id="${routineChore.id}" ${!routineChore.enabled ? 'disabled' : ''}>▶</button>
     `;
     choreList.appendChild(li);
   }
@@ -163,6 +165,14 @@ function updateRunButtonState() {
   const hasEnabledChores = currentRoutine?.chores.some(c => c.enabled) ?? false;
   runBtn.disabled = !selectedAccountId || !hasEnabledChores || isRunning;
   runBtn.textContent = isRunning ? 'Running...' : 'Run Routine';
+
+  // Enable/disable individual chore run buttons
+  const choreRunButtons = choreList.querySelectorAll('.run-chore-btn') as NodeListOf<HTMLButtonElement>;
+  for (const btn of choreRunButtons) {
+    const choreId = btn.dataset.choreId;
+    const chore = currentRoutine?.chores.find(c => c.id === choreId);
+    btn.disabled = !selectedAccountId || !chore?.enabled || isRunning;
+  }
 }
 
 // Event Listeners
@@ -255,6 +265,24 @@ function setupEventListeners() {
       const enabled = target.checked;
       await window.raiderAPI.routine.toggleChore(selectedAccountId, choreId, enabled);
       await loadRoutine(selectedAccountId);
+    }
+  });
+
+  // Run single chore button
+  choreList.addEventListener('click', async (e) => {
+    const target = e.target as HTMLElement;
+    const btn = target.closest('.run-chore-btn') as HTMLButtonElement;
+    if (btn && selectedAccountId && !isRunning) {
+      const choreId = btn.dataset.choreId as ChoreId;
+      isRunning = true;
+      updateRunButtonState();
+      runResults = [];
+      runResultsList.innerHTML = '';
+      runStatus.className = 'run-status running';
+      statusValue.textContent = `Running ${getChoreName(choreId)}...`;
+
+      const { runId } = await window.raiderAPI.run.chore(selectedAccountId, choreId);
+      currentRunId = runId;
     }
   });
 

@@ -25,6 +25,7 @@ internal sealed class ChoreExecutor
             { "ClanCheckIn", new ClanCheckInChoreHandler() },
             { "CollectInbox", new CollectInboxChoreHandler() },
             // Other chore handlers will be added here
+            { "BuyFreeMarketItems", new BuyFreeMarketItemsChoreHandler() },
         };
     }
 

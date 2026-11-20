@@ -68,6 +68,7 @@ public sealed class NotificationServiceTests
         
         var result = hasFailures
             ? ChoreResult.Failed(chore, "Error", null, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)
+            : ChoreResult.Success(chore, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, 0);
             : ChoreResult.Success(chore, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, null);
 
         return new Run(

@@ -7,7 +7,7 @@ import path from 'path';
 import { settingsPort } from './settings';
 import { runRoutine, type OrchestratorDeps } from './orchestrator';
 import { createFakeGamePort, RealGamePort } from './game-port';
-import { IPC_CHANNELS, type RoutineGetRequest, type RoutineUpdateRequest, type RoutineReorderRequest, type RoutineToggleChoreRequest, type AccountCreateRequest, type AccountDeleteRequest, type AccountRenameRequest, type RunStartRequest } from './ipc';
+import { IPC_CHANNELS, type RoutineGetRequest, type RoutineUpdateRequest, type RoutineReorderRequest, type RoutineToggleChoreRequest, type AccountCreateRequest, type AccountDeleteRequest, type AccountRenameRequest, type RunStartRequest, type RunChoreRequest } from './ipc';
 import type { Account, Routine, ChoreId, Run } from '../shared/types';
 import { createAccount, createDefaultRoutine } from '../shared/types';
 
@@ -145,6 +145,46 @@ ipcMain.handle(IPC_CHANNELS['run:start'], async (_event, request: RunStartReques
   (async () => {
     try {
       const run = await runRoutine(account, orchestratorDeps);
+      mainWindow?.webContents.send(IPC_CHANNELS['run:complete'], { runId, run });
+    } catch (error) {
+      mainWindow?.webContents.send(IPC_CHANNELS['run:complete'], {
+        runId,
+        run: {
+          accountId: account.id,
+          startedAt: new Date(),
+          finishedAt: new Date(),
+          results: []
+        }
+      });
+    } finally {
+      runningRuns.delete(runId);
+    }
+  })();
+
+  return { runId };
+});
+
+ipcMain.handle(IPC_CHANNELS['run:chore'], async (_event, request: RunChoreRequest): Promise<{ runId: string }> => {
+  const accounts = await settingsPort.loadAccounts();
+  const account = accounts.find(a => a.id === request.accountId);
+  if (!account) throw new Error('Account not found');
+
+  const runId = `run-${Date.now()}`;
+  const abortController = new AbortController();
+
+  runningRuns.set(runId, { account, abortController });
+
+  // Run single chore in background
+  (async () => {
+    try {
+      await gamePort.switchAccount(account.id);
+      const result = await gamePort.executeChore(request.choreId);
+      const run: Run = {
+        accountId: account.id,
+        startedAt: new Date(),
+        finishedAt: new Date(),
+        results: [result]
+      };
       mainWindow?.webContents.send(IPC_CHANNELS['run:complete'], { runId, run });
     } catch (error) {
       mainWindow?.webContents.send(IPC_CHANNELS['run:complete'], {
