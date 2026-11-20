@@ -12,7 +12,6 @@ public sealed class PluginInstallerService : IPluginInstallerService
     private const string TokenFileName = "raider.token";
     private const string PluginVersion = "1.0.0";
     private const string PluginGuid = "com.malloc9.raider";
-    private const int HealthPort = 51837;
 
     /// <summary>Files and folders BepInEx's zip puts in the game folder; removed on uninstall.</summary>
     private static readonly string[] BepInExRootFiles = { "winhttp.dll", "doorstop_config.ini", ".doorstop_version", "changelog.txt" };
@@ -200,15 +199,10 @@ public sealed class PluginInstallerService : IPluginInstallerService
         var configContent = $"""
             [Raider.Plugin]
 
-            ## Per-install secret token for health endpoint authentication
+            ## Per-install secret token every request to the plugin must carry
             # Setting type: String
             # Default value:
             HealthToken = {token}
-
-            ## Health endpoint port (bound to 127.0.0.1)
-            # Setting type: Int32
-            # Default value: {HealthPort}
-            HealthPort = {HealthPort}
 
             """;
         await File.WriteAllTextAsync(Path.Combine(configDirectory, $"{PluginGuid}.cfg"), configContent, cancellationToken);

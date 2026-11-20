@@ -25,4 +25,9 @@
     <Reference Include="UnityEngine.UI" HintPath="Interop/UnityEngine.UI.dll" Private="false" Condition="Exists('Interop/UnityEngine.UI.dll')" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Instance registration format, shared with the other side of the plugin connection -->
+    <Compile Include="..\Raider.Shared\InstanceRegistration.cs" Link="Shared\InstanceRegistration.cs" />
+  </ItemGroup>
+
 </Project>

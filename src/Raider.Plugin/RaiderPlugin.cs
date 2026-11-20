@@ -4,9 +4,11 @@ using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using BepInEx.Unity.IL2CPP;
+using System.Diagnostics;
 using HarmonyLib;
 using Raider.Plugin.Game;
 using Raider.Plugin.Ipc;
+using Raider.Shared;
 
 /// <summary>
 /// Main Raider plugin entry point for BepInEx 6 (IL2CPP).
@@ -18,9 +20,8 @@ public sealed class RaiderPlugin : BasePlugin
     internal static new ManualLogSource Log { get; private set; } = null!;
     internal static RaiderPlugin Instance { get; private set; } = null!;
     internal ChoreExecutor ChoreExecutor { get; private set; } = null!;
-    internal HealthServer HealthServer { get; private set; } = null!;
+    internal PluginServer Server { get; private set; } = null!;
     internal ConfigEntry<string> HealthTokenConfig { get; private set; } = null!;
-    internal ConfigEntry<int> HealthPortConfig { get; private set; } = null!;
 
     private readonly Harmony _harmony = new(PluginInfo.PLUGIN_GUID);
 
@@ -29,28 +30,23 @@ public sealed class RaiderPlugin : BasePlugin
         Log = base.Log;
         Instance = this;
 
-        // Read config for health endpoint (BepInEx/config/com.malloc9.raider.cfg, written by the desktop app's installer)
-        HealthTokenConfig = Config.Bind("Raider.Plugin", "HealthToken", "", "Per-install secret token for health endpoint authentication");
-        HealthPortConfig = Config.Bind("Raider.Plugin", "HealthPort", 51837, "Health endpoint port (bound to 127.0.0.1)");
+        // BepInEx/config/com.malloc9.raider.cfg, written by the desktop app's installer
+        HealthTokenConfig = Config.Bind("Raider.Plugin", "HealthToken", "", "Per-install secret token every request to the plugin must carry");
 
         // Initialize game access
         GameAccess.Initialize(Log);
 
-        // Start chore executor (for desktop app IPC)
         ChoreExecutor = new ChoreExecutor();
-        _ = ChoreExecutor.StartIpcServerAsync();
-
-        // Start health server
-        HealthServer = new HealthServer(HealthTokenConfig.Value, HealthPortConfig.Value, Log);
-        HealthServer.Start();
+        StartServer();
+        AppDomain.CurrentDomain.ProcessExit += (_, _) => Unregister();
 
         Log.LogInfo($"Raider plugin {PluginInfo.PLUGIN_VERSION} loaded");
     }
 
     public override bool Unload()
     {
-        ChoreExecutor?.StopIpcServer();
-        HealthServer?.Stop();
+        Unregister();
+        Server?.Stop();
         _harmony.UnpatchSelf();
         Log.LogInfo("Raider plugin unloaded");
         return true;
@@ -58,10 +54,38 @@ public sealed class RaiderPlugin : BasePlugin
 
     internal void ReloadHealthConfig()
     {
-        HealthServer?.Stop();
-        HealthServer = new HealthServer(HealthTokenConfig.Value, HealthPortConfig.Value, Log);
-        HealthServer.Start();
+        Unregister();
+        Server?.Stop();
+        StartServer();
     }
+
+    /// <summary>
+    /// Starts the server on a free port and registers this Instance so Raider can find it.
+    /// </summary>
+    private void StartServer()
+    {
+        Server = new PluginServer(HealthTokenConfig.Value, Log, ChoreExecutor.HandleRequestAsync);
+        Server.Start();
+        if (Server.Port == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            using var process = Process.GetCurrentProcess();
+            var registration = new InstanceRegistration(process.Id, Server.Port, process.StartTime.ToUniversalTime());
+            registration.WriteTo(InstanceRegistration.DefaultDirectory);
+            Log.LogInfo($"Registered Instance {registration.Pid} on port {registration.Port}");
+        }
+        catch (Exception ex)
+        {
+            Log.LogError($"Failed to register Instance: {ex.Message}");
+        }
+    }
+
+    private static void Unregister() =>
+        InstanceRegistration.Delete(InstanceRegistration.DefaultDirectory, Environment.ProcessId);
 }
 
 /// <summary>

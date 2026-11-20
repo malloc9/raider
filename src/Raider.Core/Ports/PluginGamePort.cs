@@ -6,20 +6,18 @@ using System.Text.Json;
 using Raider.Core.Models;
 
 /// <summary>
-/// Game port implementation that communicates with the in-process plugin via HTTP.
+/// Game port implementation that communicates with the in-process plugin via HTTP, through a <see cref="PluginConnection"/>.
 /// </summary>
 public sealed class PluginGamePort : IGamePort
 {
     private readonly HttpClient _httpClient;
-    private readonly string _pluginBaseUrl;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public PluginGamePort(string pluginBaseUrl = "http://localhost:51838/raider/")
+    public PluginGamePort(PluginConnection connection, HttpMessageHandler? innerHandler = null)
     {
-        _pluginBaseUrl = pluginBaseUrl.TrimEnd('/') + "/";
-        _httpClient = new HttpClient
+        _httpClient = new HttpClient(connection.CreateHandler(innerHandler))
         {
-            BaseAddress = new Uri(_pluginBaseUrl),
+            BaseAddress = PluginConnection.PlaceholderBaseUrl,
             Timeout = TimeSpan.FromSeconds(60)
         };
         _jsonOptions = new JsonSerializerOptions

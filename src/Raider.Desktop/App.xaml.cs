@@ -29,8 +29,9 @@ public partial class App : Application
                 services.AddSingleton<IPluginInstallerService>(sp => new PluginInstallerService(
                     sp.GetRequiredService<ILogger<PluginInstallerService>>(),
                     sp.GetRequiredService<IBepInExPackageProvider>()));
-                services.AddSingleton<IPluginHealthClient, PluginHealthClient>();
-                services.AddSingleton<IGamePort>(_ => new PluginGamePort());
+                services.AddSingleton(_ => new PluginConnection());
+                services.AddSingleton<IPluginHealthClient>(sp => new PluginHealthClient(sp.GetRequiredService<PluginConnection>()));
+                services.AddSingleton<IGamePort>(sp => new PluginGamePort(sp.GetRequiredService<PluginConnection>()));
                 services.AddSingleton<INotificationService, WindowsNotificationService>();
                 services.AddSingleton<IAccountStore>(_ => new JsonAccountStore());
                 services.AddSingleton<ISnapshotService, SnapshotService>();

@@ -61,7 +61,7 @@ public sealed class PluginInstallerIntegrationTests : IDisposable
         var pluginConfig = File.ReadAllText(Path.Combine(_gamePath, "BepInEx", "config", "com.malloc9.raider.cfg"));
         pluginConfig.Should().Contain("[Raider.Plugin]");
         pluginConfig.Should().Contain("HealthToken = token-123");
-        pluginConfig.Should().Contain("HealthPort = 51837");
+        pluginConfig.Should().NotContain("HealthPort");
         File.ReadAllText(Path.Combine(_gamePath, "raider.token")).Should().Be("token-123");
     }
 

@@ -8,15 +8,12 @@ using Raider.Plugin.Chores;
 using Raider.Plugin.Game;
 
 /// <summary>
-/// Executes chores and handles IPC communication with the desktop app.
+/// Executes chores for the desktop app's requests.
 /// </summary>
 internal sealed class ChoreExecutor
 {
     private readonly ManualLogSource _log;
     private readonly Dictionary<string, IChoreHandler> _choreHandlers;
-    private HttpListener? _httpListener;
-    private Thread? _listenerThread;
-    private bool _isRunning;
 
     public ChoreExecutor()
     {
@@ -33,67 +30,9 @@ internal sealed class ChoreExecutor
     }
 
     /// <summary>
-    /// Starts the HTTP server for IPC communication.
+    /// Handles one authenticated request that <see cref="Ipc.PluginServer"/> passed on.
     /// </summary>
-    public async Task StartIpcServerAsync()
-    {
-        if (_isRunning)
-            return;
-
-        _httpListener = new HttpListener();
-        _httpListener.Prefixes.Add("http://localhost:51838/raider/");
-        
-        try
-        {
-            _httpListener.Start();
-            _isRunning = true;
-            _listenerThread = new Thread(ListenLoop) { IsBackground = true };
-            _listenerThread.Start();
-            _log.LogInfo("IPC server started on http://localhost:51838/raider/");
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Failed to start IPC server: {ex.Message}");
-            _isRunning = false;
-        }
-    }
-
-    /// <summary>
-    /// Stops the HTTP server.
-    /// </summary>
-    public void StopIpcServer()
-    {
-        if (!_isRunning)
-            return;
-
-        _isRunning = false;
-        _httpListener?.Stop();
-        _httpListener?.Close();
-        _listenerThread?.Join(TimeSpan.FromSeconds(2));
-        _log.LogInfo("IPC server stopped");
-    }
-
-    private void ListenLoop()
-    {
-        while (_isRunning && _httpListener?.IsListening == true)
-        {
-            try
-            {
-                var context = _httpListener.GetContext();
-                _ = Task.Run(() => HandleRequestAsync(context));
-            }
-            catch (HttpListenerException) when (!_isRunning)
-            {
-                break;
-            }
-            catch (Exception ex)
-            {
-                _log.LogError($"Error in IPC listen loop: {ex.Message}");
-            }
-        }
-    }
-
-    private async Task HandleRequestAsync(HttpListenerContext context)
+    public async Task HandleRequestAsync(HttpListenerContext context)
     {
         var request = context.Request;
         var response = context.Response;
@@ -102,9 +41,6 @@ internal sealed class ChoreExecutor
         {
             switch (request.HttpMethod)
             {
-                case "GET" when request.Url?.AbsolutePath == "/raider/health":
-                    await WriteResponseAsync(response, 200, new { status = "ok" });
-                    break;
                 case "GET" when request.Url?.AbsolutePath == "/raider/game-build":
                     await HandleGetGameBuildAsync(response);
                     break;

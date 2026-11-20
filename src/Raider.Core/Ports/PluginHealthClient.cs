@@ -6,20 +6,18 @@ using System.Text.Json;
 using Raider.Core.Models;
 
 /// <summary>
-/// HTTP client for the plugin's health endpoint on 127.0.0.1.
+/// HTTP client for the plugin's health endpoint, through a <see cref="PluginConnection"/>.
 /// </summary>
 public sealed class PluginHealthClient : IPluginHealthClient
 {
     private readonly HttpClient _httpClient;
-    private readonly string _baseUrl;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public PluginHealthClient(int port = 51837)
+    public PluginHealthClient(PluginConnection connection, HttpMessageHandler? innerHandler = null)
     {
-        _baseUrl = $"http://127.0.0.1:{port}/raider/";
-        _httpClient = new HttpClient
+        _httpClient = new HttpClient(connection.CreateHandler(innerHandler))
         {
-            BaseAddress = new Uri(_baseUrl),
+            BaseAddress = PluginConnection.PlaceholderBaseUrl,
             Timeout = TimeSpan.FromSeconds(5)
         };
         _jsonOptions = new JsonSerializerOptions

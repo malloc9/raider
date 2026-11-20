@@ -26,6 +26,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private GameInstallation? _gameInstallation;
     private string _token = string.Empty;
+    private readonly PluginConnection _pluginConnection;
     private CancellationTokenSource? _healthCheckCts;
     private readonly object _lock = new();
 
@@ -36,8 +37,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IGamePort gamePort,
         IAccountStore accountStore,
         RunOrchestrator runOrchestrator,
+        PluginConnection pluginConnection,
         ILogger<MainWindowViewModel> logger)
     {
+        _pluginConnection = pluginConnection;
         _gameDetectionService = gameDetectionService;
         _pluginInstallerService = pluginInstallerService;
         _pluginHealthClient = pluginHealthClient;
@@ -122,6 +125,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             
             // Get or create token
             _token = await _pluginInstallerService.GetOrCreateTokenAsync(_gameInstallation);
+            _pluginConnection.Token = _token;
             AddLog("Token retrieved/generated");
 
             // Check install state
