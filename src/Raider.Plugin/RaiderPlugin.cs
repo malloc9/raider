@@ -35,6 +35,7 @@ public sealed class RaiderPlugin : BasePlugin
 
         // Initialize game access
         GameAccess.Initialize(Log);
+        MainThread.Start(this, Log);
 
         ChoreExecutor = new ChoreExecutor();
         StartServer();
