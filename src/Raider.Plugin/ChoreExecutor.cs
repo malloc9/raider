@@ -23,12 +23,14 @@ internal sealed class ChoreExecutor
         _log = RaiderPlugin.Log;
         _choreHandlers = new Dictionary<string, IChoreHandler>(StringComparer.OrdinalIgnoreCase)
         {
+            { "ClaimPlaytimeRewards", new ClaimPlaytimeRewardsChoreHandler() },
             { "ClanCheckIn", new ClanCheckInChoreHandler() },
             { "CollectInbox", new CollectInboxChoreHandler() },
             { "BuyFreeMarketItems", new BuyFreeMarketItemsChoreHandler() },
             { "CollectGemMine", new CollectGemMineChoreHandler() },
             { "ClaimPlaytimeRewards", new ClaimPlaytimeRewardsChoreHandler() },
             { "ClaimQuests", new ClaimQuestsChoreHandler() },
+            // Other chore handlers will be added here
         };
     }
 

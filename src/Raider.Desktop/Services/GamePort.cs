@@ -72,6 +72,36 @@ public sealed class GamePort : IGamePort
             ChoreType = chore.Type.ToString(),
             Parameters = new Dictionary<string, object>()
         };
+        var request = new IpcRequest("ExecuteChore", chore.Type.ToString());
+        var response = await SendRequestAsync(request, cancellationToken);
+        
+        return new ChoreExecutionResult(
+            response.Success,
+            response.ErrorMessage,
+            response.GemsCollected,
+            response.Data);
+    }
+
+    public async Task<string> GetGameStateJsonAsync(CancellationToken cancellationToken = default)
+    {
+        var response = await SendRequestAsync(new IpcRequest("GetGameState"), cancellationToken);
+        return response.Success && !string.IsNullOrEmpty(response.Data) 
+            ? response.Data 
+            : "{}";
+    }
+
+    public async Task<string> GetPluginLogExcerptAsync(int maxLines, CancellationToken cancellationToken = default)
+    {
+        var response = await SendRequestAsync(new IpcRequest("GetPluginLog"), cancellationToken);
+        return response.Success && !string.IsNullOrEmpty(response.Data) 
+            ? response.Data 
+            : "";
+    }
+
+    private async Task<IpcResponse> SendRequestAsync(IpcRequest request, CancellationToken cancellationToken)
+    {
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        cts.CancelAfter(_operationTimeout);
 
         try
         {

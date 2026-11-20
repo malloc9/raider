@@ -70,7 +70,17 @@ public sealed class PluginGamePort : IGamePort
                 return new ChoreExecutionResult(false, "Plugin returned null response");
             }
 
-            return new ChoreExecutionResult(result.Success, result.ErrorMessage, result.Data);
+            // Extract gems collected from Data if present
+            int gemsCollected = 0;
+            if (result.Data is JsonElement jsonElement)
+            {
+                if (jsonElement.TryGetProperty("gemsCollected", out var gemsProp) && gemsProp.ValueKind == JsonValueKind.Number)
+                {
+                    gemsCollected = gemsProp.GetInt32();
+                }
+            }
+
+            return new ChoreExecutionResult(result.Success, result.ErrorMessage, gemsCollected, result.Data);
         }
         catch (HttpRequestException ex)
         {
