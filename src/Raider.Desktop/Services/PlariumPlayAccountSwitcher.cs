@@ -45,6 +45,13 @@ public sealed class PlariumPlayAccountSwitcher : IAccountSwitcher
             return AccountSwitchResult.Failed("Plarium Play is not running; start it and try again");
         }
 
+        // Windows hides an elevated app's window contents from a non-elevated one (UIPI)
+        if (ProcessElevation.IsElevated(window.Current.ProcessId) == true && ProcessElevation.IsCurrentProcessElevated() == false)
+        {
+            return AccountSwitchResult.Failed(
+                "Plarium Play runs as administrator, so Raider can only switch Accounts when it runs as administrator too");
+        }
+
         try
         {
             // 1. Open the account menu and its "Switch account" list, unless the login is already listed
