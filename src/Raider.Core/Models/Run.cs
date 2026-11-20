@@ -11,18 +11,38 @@ public sealed record Run(
     IReadOnlyList<ChoreResult> Results,
     DateTimeOffset StartedAt,
     DateTimeOffset CompletedAt,
-    string LogDirectory
+    string LogDirectory,
+    RunStatus Status = RunStatus.Completed,
+    string? StatusMessage = null
 )
 {
-    public bool HasFailures => Results.Any(r => r.IsFailure);
-    
+    public bool HasFailures => Status == RunStatus.SwitchFailed || Results.Any(r => r.IsFailure);
+
+    /// <summary>The Run stopped before any Chore because the Account switch needs the player to log in by hand.</summary>
+    public bool NeedsManualLogin => Status == RunStatus.NeedsManualLogin;
+
     public bool IsGameBuildMismatch => !TargetedGameBuild.Matches(ActualGameBuild);
-    
+
     public int FailureCount => Results.Count(r => r.IsFailure);
-    
+
     public int SuccessCount => Results.Count(r => r.Outcome == ChoreOutcome.Success);
-    
+
     public int BrokenByGameUpdateCount => Results.Count(r => r.Outcome == ChoreOutcome.BrokenByGameUpdate);
-    
+
     public TimeSpan Duration => CompletedAt - StartedAt;
+}
+
+/// <summary>
+/// How far a Run got.
+/// </summary>
+public enum RunStatus
+{
+    /// <summary>The Account was active (or switched to) and every Chore in the Routine was attempted.</summary>
+    Completed,
+
+    /// <summary>The Account switch needs a password; the Run stopped and the player must log in by hand.</summary>
+    NeedsManualLogin,
+
+    /// <summary>The Account switch failed for another reason; no Chore was attempted.</summary>
+    SwitchFailed
 }

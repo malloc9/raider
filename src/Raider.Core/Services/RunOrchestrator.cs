@@ -43,7 +43,8 @@ public sealed class RunOrchestrator
 
         // Get actual game build
         var actualGameBuild = await _gamePort.GetGameBuildAsync(cancellationToken);
-        var isBuildMismatch = !_targetedGameBuild.Matches(actualGameBuild);
+        // An Unknown target means no build is pinned, so nothing can be a mismatch
+        var isBuildMismatch = _targetedGameBuild != GameBuild.Unknown && !_targetedGameBuild.Matches(actualGameBuild);
         
         if (isBuildMismatch)
         {
@@ -53,8 +54,18 @@ public sealed class RunOrchestrator
                 actualGameBuild.Version);
         }
 
-        // Switch to account
-        await _gamePort.SwitchAccountAsync(account, cancellationToken);
+        // Account switch, only when the game is on another (or an unknown) Account
+        var currentLogin = await _gamePort.GetCurrentPlariumLoginAsync(cancellationToken);
+        if (!string.Equals(currentLogin, account.PlariumLogin, StringComparison.OrdinalIgnoreCase))
+        {
+            _logger.LogInformation("Switching from {CurrentLogin} to account {AccountId}", currentLogin ?? "(unknown)", account.Id);
+            var switchResult = await _gamePort.SwitchAccountAsync(account, cancellationToken);
+
+            if (switchResult.Outcome != AccountSwitchOutcome.Switched)
+            {
+                return await StopRunAsync(runId, account, actualGameBuild, switchResult, startedAt, logDirectory, cancellationToken);
+            }
+        }
 
         var results = new List<ChoreResult>();
 
@@ -136,6 +147,67 @@ public sealed class RunOrchestrator
         // Show notification only if there were failures
         if (run.HasFailures)
         {
+            await _notificationService.ShowRunCompletionNotificationAsync(run, cancellationToken);
+        }
+
+        return run;
+    }
+
+    /// <summary>
+    /// Runs several Accounts one at a time in the single game instance, in the given order.
+    /// An Account whose switch needs a password is stopped and the remaining Accounts continue.
+    /// Each Account's logs and snapshots go to its own subfolder of <paramref name="logDirectory"/>.
+    /// </summary>
+    public async Task<IReadOnlyList<Run>> ExecuteRunsAsync(
+        IEnumerable<Account> accounts,
+        string logDirectory,
+        CancellationToken cancellationToken = default)
+    {
+        var runs = new List<Run>();
+
+        foreach (var account in accounts)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var accountLogDirectory = Path.Combine(logDirectory, account.Id);
+            runs.Add(await ExecuteRunAsync(account, accountLogDirectory, cancellationToken));
+        }
+
+        return runs;
+    }
+
+    private async Task<Run> StopRunAsync(
+        string runId,
+        Account account,
+        GameBuild actualGameBuild,
+        AccountSwitchResult switchResult,
+        DateTimeOffset startedAt,
+        string logDirectory,
+        CancellationToken cancellationToken)
+    {
+        var status = switchResult.Outcome == AccountSwitchOutcome.PasswordRequired
+            ? RunStatus.NeedsManualLogin
+            : RunStatus.SwitchFailed;
+
+        var run = new Run(
+            runId,
+            account,
+            _targetedGameBuild,
+            actualGameBuild,
+            Array.Empty<ChoreResult>(),
+            startedAt,
+            DateTimeOffset.UtcNow,
+            logDirectory,
+            status,
+            switchResult.ErrorMessage);
+
+        if (status == RunStatus.NeedsManualLogin)
+        {
+            _logger.LogWarning("Run {RunId} stopped: account {AccountId} needs the player to log in by hand", runId, account.Id);
+            await _notificationService.ShowManualLoginRequiredNotificationAsync(account, cancellationToken);
+        }
+        else
+        {
+            _logger.LogError("Run {RunId} stopped: switching to account {AccountId} failed: {Error}", runId, account.Id, switchResult.ErrorMessage);
             await _notificationService.ShowRunCompletionNotificationAsync(run, cancellationToken);
         }
 

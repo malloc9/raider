@@ -5,22 +5,23 @@
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         xmlns:local="clr-namespace:Raider.Desktop.Views"
         xmlns:vm="clr-namespace:Raider.Desktop.ViewModels"
+        xmlns:models="clr-namespace:Raider.Core.Models;assembly=Raider.Core"
+        d:DataContext="{d:DesignInstance Type=vm:MainWindowViewModel}"
         mc:Ignorable="d"
         Title="Raider - Raid: Shadow Legends Automation" 
-        Height="600" Width="800"
+        Height="760" Width="900"
         MinHeight="500" MinWidth="700"
         WindowStartupLocation="CenterScreen"
         Background="{DynamicResource {x:Static SystemColors.WindowBrushKey}}">
     
-    <Window.DataContext>
-        <vm:MainWindowViewModel />
-    </Window.DataContext>
+    <!-- DataContext is the MainWindowViewModel injected in the constructor -->
 
     <Grid Margin="16">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
+            <RowDefinition Height="2*" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
@@ -46,13 +47,13 @@
                         <Ellipse.Style>
                             <Style TargetType="Ellipse">
                                 <Style.Triggers>
-                                    <DataTrigger Binding="{Binding PluginStatus}" Value="{x:Static vm:PluginInstallState+Connected}">
+                                    <DataTrigger Binding="{Binding PluginStatus}" Value="{x:Static models:PluginInstallState.Connected}">
                                         <Setter Property="Fill" Value="#107C10" />
                                     </DataTrigger>
-                                    <DataTrigger Binding="{Binding PluginStatus}" Value="{x:Static vm:PluginInstallState+Installed}">
+                                    <DataTrigger Binding="{Binding PluginStatus}" Value="{x:Static models:PluginInstallState.Installed}">
                                         <Setter Property="Fill" Value="#FFB900" />
                                     </DataTrigger>
-                                    <DataTrigger Binding="{Binding PluginStatus}" Value="{x:Static vm:PluginInstallState+NotInstalled}">
+                                    <DataTrigger Binding="{Binding PluginStatus}" Value="{x:Static models:PluginInstallState.NotInstalled}">
                                         <Setter Property="Fill" Value="#A4262C" />
                                     </DataTrigger>
                                 </Style.Triggers>
@@ -117,8 +118,86 @@
             </StackPanel>
         </Border>
 
+        <!-- Accounts -->
+        <Border Grid.Row="3" BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,0,0,12" Background="#FAFAFA">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,4">
+                    <TextBlock DockPanel.Dock="Left" Text="Accounts" FontSize="14" FontWeight="SemiBold" VerticalAlignment="Center" />
+                    <Button DockPanel.Dock="Right" Content="Run now (all accounts)" Command="{Binding RunAllAccountsCommand}" />
+                </DockPanel>
+
+                <!-- Add Account: Plarium login only. Raider never asks for a password. -->
+                <StackPanel Grid.Row="1" Orientation="Horizontal" Margin="0,0,0,8">
+                    <TextBlock Text="Plarium login" VerticalAlignment="Center" Margin="0,0,4,0" />
+                    <TextBox Text="{Binding NewPlariumLogin, UpdateSourceTrigger=PropertyChanged}" Width="220"
+                             ToolTip="The email or username Plarium Play already remembers. No password needed." />
+                    <TextBlock Text="Name" VerticalAlignment="Center" Margin="8,0,4,0" />
+                    <TextBox Text="{Binding NewDisplayName, UpdateSourceTrigger=PropertyChanged}" Width="160" />
+                    <Button Content="Add account" Command="{Binding AddAccountCommand}" />
+                </StackPanel>
+
+                <ListBox Grid.Row="2" ItemsSource="{Binding Accounts}" BorderThickness="0" Background="Transparent"
+                         HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+                    <ListBox.ItemTemplate>
+                        <DataTemplate DataType="{x:Type vm:AccountItemViewModel}">
+                            <Border BorderBrush="#DDDDDD" BorderThickness="0,0,0,1" Padding="4,6">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="True">
+                                        <Button DockPanel.Dock="Right" Content="Remove"
+                                                Command="{Binding DataContext.RemoveAccountCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}" />
+                                        <Button DockPanel.Dock="Right" Content="Run now"
+                                                Command="{Binding DataContext.RunAccountCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}" />
+                                        <StackPanel VerticalAlignment="Center">
+                                            <TextBlock>
+                                                <Run Text="{Binding DisplayName, Mode=OneWay}" FontWeight="SemiBold" />
+                                                <Run Text="{Binding PlariumLogin, Mode=OneWay}" Foreground="Gray" />
+                                            </TextBlock>
+                                            <TextBlock Text="{Binding Status}" FontSize="12">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="Foreground" Value="Gray" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding NeedsManualLogin}" Value="True">
+                                                                <Setter Property="Foreground" Value="#A4262C" />
+                                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </StackPanel>
+                                    </DockPanel>
+                                    <!-- This Account's Routine -->
+                                    <ItemsControl ItemsSource="{Binding Chores}" Margin="0,4,0,0">
+                                        <ItemsControl.ItemsPanel>
+                                            <ItemsPanelTemplate>
+                                                <WrapPanel />
+                                            </ItemsPanelTemplate>
+                                        </ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate DataType="{x:Type vm:ChoreToggleViewModel}">
+                                                <CheckBox Content="{Binding Name}" IsChecked="{Binding IsEnabled}" Margin="0,0,12,0" FontSize="12" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ListBox.ItemTemplate>
+                </ListBox>
+            </Grid>
+        </Border>
+
         <!-- Log -->
-        <Border Grid.Row="3" BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="8" Padding="8" Background="White">
+        <Border Grid.Row="4" BorderBrush="#CCCCCC" BorderThickness="1" CornerRadius="8" Padding="8" Background="White">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
@@ -146,7 +225,7 @@
         </Border>
 
         <!-- Status Bar -->
-        <StatusBar Grid.Row="4" Margin="0,12,0,0">
+        <StatusBar Grid.Row="5" Margin="0,12,0,0">
             <StatusBarItem>
                 <TextBlock Text="{Binding StatusMessage}" />
             </StatusBarItem>
