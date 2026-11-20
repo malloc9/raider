@@ -6,10 +6,18 @@ using static Raider.Plugin.Game.Il2CppReflection;
 /// <summary>
 /// Claim playtime rewards: collects every playtime gift whose timer has finished, without waiting for the rest.
 /// <para>
-/// Game side: <c>UserWrapper.HourlyGiftsWrapper</c> (Client.Model.Gameplay.SessionChests.HourlyGiftsWrapper).
-/// <c>PrizesByMinutes</c>, <c>PrizeReceivedMinutes</c> and <c>TotalMsInGameToday</c> give the finished, untaken gifts by their minute
-/// threshold; <c>TakeSessionChestCmd(minutes)</c> takes one. The Plarium Play program has its own row of gifts
-/// (<c>PlariumProgramPrizesByMinutes</c>, <c>TakePlariumProgramSessionChestCmd</c>).
+/// Game side. The game's own helper, <c>UserWrapper.HourlyGiftsWrapper</c>, throws KeyNotFoundException(0) live on
+/// its computed members, so the gift state is read from the data underneath it:
+/// <list type="bullet">
+/// <item>Progress: <c>UserWrapper.User.GameData.SessionChestData</c> (SharedModel.Meta.SessionChests.UserSessionChestData):
+/// <c>TotalMsInGameToday</c>, <c>PrizeReceivedMinutes</c>, <c>UserLevelForSessionChest</c>; the Plarium Play
+/// program's own row in <c>PlariumProgramChest</c> (when <c>HasPlariumProgramChest</c>).</item>
+/// <item>Prizes: <c>HourlyGiftsWrapper._staticData.SessionChestInfos</c>, one SessionChestInfo per account-level band
+/// (<c>MinUserLevel</c>..<c>MaxUserLevel</c>) with <c>UserPrizeByMinutes</c> and <c>PlariumProgramPrizesByMinutes</c>.</item>
+/// </list>
+/// A gift is ready when its minute threshold is at most the server-counted play time and it is not in the received
+/// list. The server count lags the running session, so this never claims early; the game re-checks every claim.
+/// <c>TakeSessionChestCmd(minutes)</c> / <c>TakePlariumProgramSessionChestCmd(minutes)</c> take one gift.
 /// </para>
 /// </summary>
 internal sealed class ClaimPlaytimeRewardsChoreHandler : IChoreHandler
@@ -22,58 +30,48 @@ internal sealed class ClaimPlaytimeRewardsChoreHandler : IChoreHandler
 
     private static ChorePlan Plan(object userWrapper)
     {
-        var gifts = GetRequired(userWrapper, "HourlyGiftsWrapper");
-        var commands = new List<PlannedCommand>();
-        var sources = new[]
+        var progress = GetRequired(GetRequired(GetRequired(userWrapper, "User"), "GameData"), "SessionChestData");
+        var infos = Items(Get(GetRequired(GetRequired(userWrapper, "HourlyGiftsWrapper"), "_staticData"), "SessionChestInfos")).ToList();
+        if (infos.Count == 0)
         {
-            new GiftRow("Playtime", TakeRegular, "TotalMsInGameToday", "PrizesByMinutes", "PrizeReceivedMinutes"),
-            new GiftRow("PlariumPlay", TakePlarium, "TotalMsInPlariumPlayToday", "PlariumProgramPrizesByMinutes", "PlariumPlayPrizeReceivedMinutes")
-        };
-
-        var details = new Dictionary<string, object?>();
-        foreach (var row in sources)
-        {
-            try
-            {
-                var (playtime, ready) = FinishedGifts(gifts, row);
-                details[row.Name] = new { playtimeTodayMinutes = playtime, ready };
-                commands.AddRange(ready.Select(minutes =>
-                    new PlannedCommand(row.Command, new object?[] { minutes }, new { gift = row.Name, minutes })));
-            }
-            catch (Exception ex)
-            {
-                // One row of gifts the game cannot answer for (e.g. the Plarium Play program not running) must not
-                // stop the other
-                details[row.Name] = new { error = ex.GetBaseException().Message };
-            }
+            throw new GameStateException("the game has no playtime gift tables (StaticSessionChestData.SessionChestInfos is empty)");
         }
 
-        if (commands.Count == 0 && details.Values.All(d => d?.GetType().GetProperty("error") != null))
+        var sessionChestLevel = Convert.ToInt32(Get(progress, "UserLevelForSessionChest"));
+        var accountLevel = Convert.ToInt32(Get(GetRequired(userWrapper, "Account"), "Level"));
+        // The level the server fixed for today's gifts; 0 before it has set one, then the account level decides
+        var level = sessionChestLevel > 0 ? sessionChestLevel : accountLevel;
+        var band = infos.FirstOrDefault(info =>
+                Convert.ToInt32(Get(info, "MinUserLevel")) <= level && level <= Convert.ToInt32(Get(info, "MaxUserLevel")))
+            ?? throw new GameStateException($"no playtime gift table covers level {level}");
+
+        var commands = new List<PlannedCommand>();
+        var details = new Dictionary<string, object?>
         {
-            // Not "nothing to do": the gift state could not be read at all
-            throw new GameStateException($"could not read the playtime gifts: {System.Text.Json.JsonSerializer.Serialize(details)}");
+            ["level"] = new { sessionChestLevel, accountLevel }
+        };
+
+        AddRow("Playtime", TakeRegular, progress, Get(band, "UserPrizeByMinutes"), commands, details);
+        if (Convert.ToBoolean(Get(progress, "HasPlariumProgramChest")) && Get(progress, "PlariumProgramChest") is { } plarium)
+        {
+            AddRow("PlariumPlay", TakePlarium, plarium, Get(band, "PlariumProgramPrizesByMinutes"), commands, details);
         }
 
         return commands.Count == 0 ? ChorePlan.Nothing("NoFinishedGifts", details) : new ChorePlan(commands, "", details);
     }
 
-    /// <summary>
-    /// The gift thresholds (in minutes played today) that are reached and not yet taken. Read from the raw tables
-    /// (prizes by minutes, minutes already received, server-counted play time) rather than the game's
-    /// PlaytimeTodayMinutes / RewardsToCollect helpers, which throw KeyNotFoundException(0) live. The server-counted
-    /// time lags behind the current session, so this never claims early; the game re-checks every claim anyway.
-    /// </summary>
-    private static (int Playtime, List<int> Ready) FinishedGifts(object gifts, GiftRow row)
+    /// <summary>Plans one row of gifts; <paramref name="row"/> has TotalMsInGameToday and PrizeReceivedMinutes.</summary>
+    private static void AddRow(
+        string name, string command, object row, object? prizesByMinutes,
+        List<PlannedCommand> commands, Dictionary<string, object?> details)
     {
-        var playtime = (int)(Convert.ToInt64(Get(gifts, row.PlayedMsMember)) / 60_000);
-        var received = Items(Get(gifts, row.ReceivedMember)).Select(Convert.ToInt32).ToHashSet();
-        var ready = Items(Get(gifts, row.PrizesMember))
-            .Select(entry => Convert.ToInt32(Get(entry, "Key")))
-            .Where(minutes => minutes <= playtime && !received.Contains(minutes))
-            .OrderBy(minutes => minutes)
-            .ToList();
-        return (playtime, ready);
-    }
+        var playtime = (int)(Convert.ToInt64(Get(row, "TotalMsInGameToday")) / 60_000);
+        var received = Items(Get(row, "PrizeReceivedMinutes")).Select(Convert.ToInt32).ToHashSet();
+        var thresholds = Items(prizesByMinutes).Select(entry => Convert.ToInt32(Get(entry, "Key"))).OrderBy(m => m).ToList();
+        var ready = thresholds.Where(minutes => minutes <= playtime && !received.Contains(minutes)).ToList();
 
-    private sealed record GiftRow(string Name, string Command, string PlayedMsMember, string PrizesMember, string ReceivedMember);
+        details[name] = new { playtimeTodayMinutes = playtime, thresholds, received, ready };
+        commands.AddRange(ready.Select(minutes =>
+            new PlannedCommand(command, new object?[] { minutes }, new { gift = name, minutes })));
+    }
 }
