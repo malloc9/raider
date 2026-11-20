@@ -26,6 +26,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private GameInstallation? _gameInstallation;
     private string _token = string.Empty;
+    private readonly PluginConnection _pluginConnection;
     private CancellationTokenSource? _healthCheckCts;
     private readonly object _lock = new();
 
@@ -36,8 +37,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IGamePort gamePort,
         IAccountStore accountStore,
         RunOrchestrator runOrchestrator,
+        PluginConnection pluginConnection,
         ILogger<MainWindowViewModel> logger)
     {
+        _pluginConnection = pluginConnection;
         _gameDetectionService = gameDetectionService;
         _pluginInstallerService = pluginInstallerService;
         _pluginHealthClient = pluginHealthClient;
@@ -122,6 +125,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             
             // Get or create token
             _token = await _pluginInstallerService.GetOrCreateTokenAsync(_gameInstallation);
+            _pluginConnection.Token = _token;
             AddLog("Token retrieved/generated");
 
             // Check install state
@@ -181,7 +185,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             if (result.Success)
             {
                 PluginStatus = PluginInstallState.Installed;
-                StatusMessage = "Plugin installed successfully. Start the game to connect.";
+                StatusMessage = "Plugin installed. Restart the game (its first start with BepInEx takes a few minutes).";
                 AddLog($"Plugin v{result.InstalledPluginVersion} and BepInEx v{result.InstalledBepInExVersion} installed");
                 
                 // Start health monitoring after install
@@ -360,11 +364,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         try
         {
-            // One at a time in the single game instance, switching Accounts between Runs
+            // One at a time; driving every running Instance at once comes with #33
             foreach (var item in items)
             {
                 item.Status = "Running...";
-                item.NeedsManualLogin = false;
                 AddLog($"Run started for {item.DisplayName}");
 
                 var run = await _runOrchestrator.ExecuteRunAsync(item.ToAccount(), Path.Combine(logDirectory, item.Id));
@@ -385,23 +388,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private void ReportRun(AccountItemViewModel item, Run run)
     {
-        switch (run.Status)
-        {
-            case RunStatus.NeedsManualLogin:
-                item.NeedsManualLogin = true;
-                item.Status = "Log in by hand in Plarium Play, then run again";
-                StatusMessage = $"{item.DisplayName} needs you to log in by hand in Plarium Play";
-                AddLog($"{item.DisplayName}: Plarium Play asks for the password. Log in by hand; continuing with the next account.");
-                break;
-            case RunStatus.SwitchFailed:
-                item.Status = $"Account switch failed: {run.StatusMessage}";
-                AddLog($"{item.DisplayName}: account switch failed: {run.StatusMessage}");
-                break;
-            default:
-                item.Status = $"Done: {run.SuccessCount} ok, {run.FailureCount} failed";
-                AddLog($"{item.DisplayName}: {run.SuccessCount} chore(s) succeeded, {run.FailureCount} failed");
-                break;
-        }
+        item.Status = $"Done: {run.SuccessCount} ok, {run.FailureCount} failed";
+        AddLog($"{item.DisplayName}: {run.SuccessCount} chore(s) succeeded, {run.FailureCount} failed");
     }
 
     private void SaveAccountsInBackground() => _ = SaveAccountsAsync();

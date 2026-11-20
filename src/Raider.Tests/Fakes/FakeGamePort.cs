@@ -12,8 +12,6 @@ public sealed class FakeGamePort : IGamePort
     private readonly Dictionary<Chore, ChoreExecutionResult> _choreResults = new();
     private string _gameStateJson = "{}";
     private string _pluginLogExcerpt = "";
-    private readonly Dictionary<string, AccountSwitchResult> _switchResults = new(StringComparer.OrdinalIgnoreCase);
-    private string? _currentPlariumLogin;
 
     /// <summary>
     /// Sets the game build to return.
@@ -39,47 +37,13 @@ public sealed class FakeGamePort : IGamePort
         => Task.FromResult(_gameBuild);
 
     /// <summary>
-    /// Sets which Plarium login the game is currently logged into (null = unknown).
-    /// </summary>
-    public void SetCurrentPlariumLogin(string? plariumLogin) => _currentPlariumLogin = plariumLogin;
-
-    /// <summary>
-    /// Makes switching to <paramref name="plariumLogin"/> end with <paramref name="result"/> instead of succeeding.
-    /// </summary>
-    public void SetSwitchResult(string plariumLogin, AccountSwitchResult result) => _switchResults[plariumLogin] = result;
-
-    /// <summary>
-    /// Plarium logins switched to, in order.
-    /// </summary>
-    public List<string> SwitchedTo { get; } = new();
-
-    /// <summary>
-    /// Every call in order: "switch:&lt;login&gt;" or "chore:&lt;login&gt;:&lt;chore id&gt;".
+    /// Chore ids executed, in order.
     /// </summary>
     public List<string> CallLog { get; } = new();
 
-    public Task<string?> GetCurrentPlariumLoginAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult(_currentPlariumLogin);
-
-    public Task<AccountSwitchResult> SwitchAccountAsync(Account account, CancellationToken cancellationToken = default)
-    {
-        SwitchedTo.Add(account.PlariumLogin);
-        CallLog.Add($"switch:{account.PlariumLogin}");
-
-        if (_switchResults.TryGetValue(account.PlariumLogin, out var result) && result.Outcome != AccountSwitchOutcome.Switched)
-        {
-            // Like the real launcher: after a failed switch, which Account is active is unknown
-            _currentPlariumLogin = null;
-            return Task.FromResult(result);
-        }
-
-        _currentPlariumLogin = account.PlariumLogin;
-        return Task.FromResult(AccountSwitchResult.Switched());
-    }
-
     public Task<ChoreExecutionResult> ExecuteChoreAsync(Chore chore, CancellationToken cancellationToken = default)
     {
-        CallLog.Add($"chore:{_currentPlariumLogin}:{chore.Id}");
+        CallLog.Add(chore.Id);
 
         if (_choreResults.TryGetValue(chore, out var result))
         {

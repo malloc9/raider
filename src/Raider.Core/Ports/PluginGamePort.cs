@@ -6,24 +6,18 @@ using System.Text.Json;
 using Raider.Core.Models;
 
 /// <summary>
-/// Game port implementation that communicates with the in-process plugin via HTTP.
+/// Game port implementation that communicates with the in-process plugin via HTTP, through a <see cref="PluginConnection"/>.
 /// </summary>
 public sealed class PluginGamePort : IGamePort
 {
     private readonly HttpClient _httpClient;
-    private readonly string _pluginBaseUrl;
     private readonly JsonSerializerOptions _jsonOptions;
-    private readonly IAccountSwitcher? _accountSwitcher;
-    private readonly TimeSpan _pluginStartupTimeout = TimeSpan.FromMinutes(3);
-    private string? _currentPlariumLogin;
 
-    public PluginGamePort(IAccountSwitcher? accountSwitcher = null, string pluginBaseUrl = "http://localhost:51838/raider/")
+    public PluginGamePort(PluginConnection connection, HttpMessageHandler? innerHandler = null)
     {
-        _accountSwitcher = accountSwitcher;
-        _pluginBaseUrl = pluginBaseUrl.TrimEnd('/') + "/";
-        _httpClient = new HttpClient
+        _httpClient = new HttpClient(connection.CreateHandler(innerHandler))
         {
-            BaseAddress = new Uri(_pluginBaseUrl),
+            BaseAddress = PluginConnection.PlaceholderBaseUrl,
             Timeout = TimeSpan.FromSeconds(60)
         };
         _jsonOptions = new JsonSerializerOptions
@@ -53,47 +47,6 @@ public sealed class PluginGamePort : IGamePort
         }
         
         return GameBuild.Unknown;
-    }
-
-    /// <inheritdoc />
-    public Task<string?> GetCurrentPlariumLoginAsync(CancellationToken cancellationToken = default)
-    {
-        // The game process cannot tell which Plarium login it runs under (see docs/account-switching-findings.md),
-        // so this is the last login Raider switched to. Null until the first switch, which forces one.
-        return Task.FromResult(_currentPlariumLogin);
-    }
-
-    /// <inheritdoc />
-    public async Task<AccountSwitchResult> SwitchAccountAsync(Account account, CancellationToken cancellationToken = default)
-    {
-        if (_accountSwitcher == null)
-        {
-            return AccountSwitchResult.Failed("Account switching is not available");
-        }
-
-        // The relaunched game must not be confused with the old one still answering
-        _currentPlariumLogin = null;
-
-        var result = await _accountSwitcher.SwitchToAsync(account.PlariumLogin, cancellationToken);
-        if (result.Outcome != AccountSwitchOutcome.Switched)
-        {
-            return result;
-        }
-
-        // Plarium Play relaunches the game; Chores need the plugin back online.
-        var deadline = DateTimeOffset.UtcNow + _pluginStartupTimeout;
-        while (DateTimeOffset.UtcNow < deadline)
-        {
-            if (await IsPluginHealthyAsync(cancellationToken))
-            {
-                _currentPlariumLogin = account.PlariumLogin;
-                return result;
-            }
-
-            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
-        }
-
-        return AccountSwitchResult.Failed($"Game did not come back within {_pluginStartupTimeout.TotalMinutes:0} minutes after the Account switch");
     }
 
     /// <inheritdoc />

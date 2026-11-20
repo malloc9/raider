@@ -16,4 +16,9 @@
     <PackageReference Include="Microsoft.Win32.Registry" Version="5.0.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Instance registration format, shared with the other side of the plugin connection -->
+    <Compile Include="..\Raider.Shared\InstanceRegistration.cs" Link="Shared\InstanceRegistration.cs" />
+  </ItemGroup>
+
 </Project>

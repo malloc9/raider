@@ -6,18 +6,16 @@ Accounts need their Routines (enabled/disabled chores and order) to persist betw
 
 ## Decision
 
-Store settings as JSON in the user's roaming app-data folder under `Raider`, using `electron-store`.
+Store settings as JSON in the user's roaming app-data folder under `Raider` (`JsonAccountStore` in Raider.Core).
 
 - Path: `%APPDATA%\Raider\raider-settings.json` (Windows)
-- Schema validates Accounts and their Routines
-- `electron-store` handles atomic writes, encryption (optional), and schema migration
 
 ## Consequences
 
 - **Pro**: Simple, no database required; roaming profile follows user across machines
 - **Pro**: Human-readable/editable for debugging
 - **Con**: Not suitable for high-frequency writes (but Routine changes are infrequent)
-- **Con**: Single-file; corruption loses all settings (mitigated by electron-store's atomic writes)
+- **Con**: Single-file; corruption loses all settings 
 
 ## Alternatives Considered
 

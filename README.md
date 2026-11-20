@@ -19,7 +19,7 @@ This is a .NET 8 solution with four projects:
 - ✅ App finds Raid via Plarium Play's game storage record (registry), with fallback to default StandAloneApps location
 - ✅ On clean game folder, app installs bundled BepInEx 6 and plugin without admin rights
 - ✅ Per-install secret token generated and stored in game folder
-- ✅ Plugin serves health endpoint on `http://127.0.0.1:51837/raider/health` requiring `X-Raider-Token` header
+- ✅ Plugin serves `http://localhost:<port>/raider/health` on a free port, requiring the `X-Raider-Token` header
 - ✅ Health endpoint reports: in-game status, game build, plugin version
 - ✅ App UI shows plugin status: Not Installed / Installed / Connected, and game build
 - ✅ Interop assemblies are git-ignored and documented as generated from local install
@@ -45,7 +45,7 @@ dotnet publish src/Raider.Desktop/Raider.Desktop.csproj -c Release -r win-x64 --
 
 ## Plugin Health Endpoint
 
-The plugin exposes a health endpoint at `http://127.0.0.1:51837/raider/health` that requires the `X-Raider-Token` header.
+Each running Instance's plugin listens on a free localhost port and registers it in `%LOCALAPPDATA%\Raider\instances\<pid>.json` (`{pid, port, processStart}`). Every request, including `/raider/health`, requires the `X-Raider-Token` header.
 
 Response:
 ```json

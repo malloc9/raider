@@ -1,457 +1,262 @@
-using BepInEx.Logging;
-using HarmonyLib;
-using System;
 using System.Reflection;
-using UnityEngine;
+using BepInEx.Logging;
+using Il2CppInterop.Runtime;
 
 namespace Raider.Plugin.Game;
 
 /// <summary>
-/// Provides access to the game's internal classes and methods via reflection.
+/// Reads Raid's own model through its Il2CppInterop proxy assemblies (BepInEx\interop), by reflection so the
+/// plugin builds without a local game install.
+/// <para>
+/// Raid has no Assembly-CSharp: its code is split across Unity.App, Unity.Model, Unity.SharedModel, Unity.ViewModel
+/// and others. The root of the game's state is <c>Client.App.SingleInstance&lt;Client.Model.AppModel&gt;.Instance</c>.
+/// </para>
+/// <para>
+/// Called from the plugin server's thread pool, so every read first attaches the thread to the IL2CPP runtime.
+/// Only reads are safe this way; anything that changes game state must run on Unity's main thread.
+/// </para>
 /// </summary>
 public static class GameAccess
 {
+    private const string AppModelTypeName = "Client.Model.AppModel";
+    private const string SingleInstanceTypeName = "Client.App.SingleInstance`1";
+
+    private const BindingFlags AnyInstance = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance;
+    private const BindingFlags AnyStatic = BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static;
+
+    private static readonly object InitLock = new();
     private static ManualLogSource? _logger;
     private static bool _initialized;
 
-    // Game assembly references (populated at runtime)
-    private static Assembly? _assemblyCSharp;
-    private static Assembly? _unityEngine;
-
-    // Cached types for game state detection
-    private static Type? _gameStateType;
-    private static Type? _playerDataType;
-    private static Type? _uiManagerType;
-    private static Type? _gemMineType;
-    private static Type? _versionType;
-
-    // Cached methods/properties
-    private static PropertyInfo? _isInGameProperty;
-    private static MethodInfo? _getGameBuildMethod;
-    private static PropertyInfo? _gameBuildProperty;
-    private static MethodInfo? _collectGemMineMethod;
-    private static PropertyInfo? _gemMineGemsProperty;
-    private static MethodInfo? _getPlayerDataMethod;
-    private static MethodInfo? _getGemMineControllerMethod;
+    private static PropertyInfo? _appModelInstance;
+    private static PropertyInfo? _userId;
+    private static PropertyInfo? _clientVersion;
 
     public static void Initialize(ManualLogSource logger)
     {
-        if (_initialized) return;
-        
         _logger = logger;
-        
-        try
-        {
-            // Find the game assemblies
-            foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
-            {
-                if (assembly.GetName().Name == "Assembly-CSharp")
-                {
-                    _assemblyCSharp = assembly;
-                    _logger.LogDebug("Found Assembly-CSharp");
-                }
-                else if (assembly.GetName().Name == "UnityEngine.CoreModule")
-                {
-                    _unityEngine = assembly;
-                    _logger.LogDebug("Found UnityEngine.CoreModule");
-                }
-            }
-
-            if (_assemblyCSharp == null)
-            {
-                _logger.LogError("Assembly-CSharp not found!");
-                return;
-            }
-
-            CacheTypesAndMethods();
-            _initialized = true;
-            _logger.LogInfo("GameAccess initialized successfully");
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError($"Failed to initialize GameAccess: {ex}");
-        }
+        TryInitialize();
     }
 
-    private static void CacheTypesAndMethods()
-    {
-        if (_assemblyCSharp == null) return;
-
-        // Try to find game state / version types
-        _gameStateType = FindType("GameState", "GameManager", "GameController", "AppState");
-        _versionType = FindType("GameVersion", "VersionInfo", "BuildInfo", "AppVersion");
-        _playerDataType = FindType("PlayerData", "PlayerModel", "AccountData");
-        _uiManagerType = FindType("UIManager", "WindowManager", "ViewManager");
-        _gemMineType = FindType("GemMineController", "GemMineView", "GemMineModel", "GemMineData");
-
-        // Try to find IsInGame property
-        if (_gameStateType != null)
-        {
-            _isInGameProperty = _gameStateType.GetProperty("IsInGame",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _gameStateType.GetProperty("InGame",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _gameStateType.GetProperty("IsPlaying",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-        }
-
-        // Try to find game build/version
-        if (_versionType != null)
-        {
-            _gameBuildProperty = _versionType.GetProperty("Version",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _versionType.GetProperty("GameVersion",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _versionType.GetProperty("BuildVersion",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-            _getGameBuildMethod = _versionType.GetMethod("GetVersion",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-        }
-        else if (_gameStateType != null)
-        {
-            _gameBuildProperty = _gameStateType.GetProperty("Version",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _gameStateType.GetProperty("GameVersion",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-        }
-
-        // Gem Mine methods
-        if (_gemMineType != null)
-        {
-            _collectGemMineMethod = _gemMineType.GetMethod("Collect", 
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _gemMineType.GetMethod("CollectGems",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _gemMineType.GetMethod("OnCollectClick",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-
-            _gemMineGemsProperty = _gemMineType.GetProperty("Gems", 
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _gemMineType.GetProperty("AccumulatedGems",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _gemMineType.GetProperty("AvailableGems",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _gemMineType.GetProperty("CurrentGems",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-        }
-
-        if (_playerDataType != null)
-        {
-            _getPlayerDataMethod = _playerDataType.GetProperty("Instance",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.GetGetMethod(true)
-                ?? _playerDataType.GetMethod("GetInstance",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-        }
-
-        if (_uiManagerType != null)
-        {
-            _getGemMineControllerMethod = _uiManagerType.GetMethod("GetGemMineController",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
-                ?? _uiManagerType.GetMethod("GetWindow",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static);
-        }
-
-        _logger?.LogDebug($"Cached types: GameState={_gameStateType?.Name}, Version={_versionType?.Name}, PlayerData={_playerDataType?.Name}, UIManager={_uiManagerType?.Name}, GemMine={_gemMineType?.Name}");
-        _logger?.LogDebug($"Cached props: IsInGame={_isInGameProperty?.Name}, GameBuild={_gameBuildProperty?.Name}");
-    }
-
-    private static Type? FindType(params string[] possibleNames)
-    {
-        if (_assemblyCSharp == null) return null;
-
-        foreach (var name in possibleNames)
-        {
-            var type = _assemblyCSharp.GetType(name);
-            if (type != null)
-            {
-                _logger?.LogDebug($"Found type: {name}");
-                return type;
-            }
-
-            // Try with namespace
-            type = _assemblyCSharp.GetType($"Com.Plarium.Raid.{name}");
-            if (type != null)
-            {
-                _logger?.LogDebug($"Found type with namespace: Com.Plarium.Raid.{name}");
-                return type;
-            }
-        }
-
-        return null;
-    }
+    /// <summary>True once Raid's AppModel type has been found; the AppModel itself may still be missing (game loading).</summary>
+    public static bool IsInitialized => TryInitialize();
 
     /// <summary>
-    /// Checks if the game is currently in-game (not in menus, loading, etc.).
+    /// The game's AppModel, or null while the game is still loading.
     /// </summary>
-    public static bool IsInGame()
+    public static object? GetAppModel()
     {
+        if (!TryInitialize())
+        {
+            return null;
+        }
+
         try
         {
-            if (_isInGameProperty != null && _gameStateType != null)
-            {
-                var instance = GetGameStateInstance();
-                if (instance != null)
-                {
-                    var value = _isInGameProperty.GetValue(instance);
-                    if (value is bool inGame)
-                    {
-                        return inGame;
-                    }
-                }
-            }
-
-            // Fallback: check if player data exists (logged in)
-            if (_playerDataType != null && _getPlayerDataMethod != null)
-            {
-                var playerData = _getPlayerDataMethod.Invoke(null, null);
-                if (playerData != null)
-                {
-                    var idProperty = _playerDataType.GetProperty("Id",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)
-                        ?? _playerDataType.GetProperty("AccountId",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (idProperty != null)
-                    {
-                        var idValue = idProperty.GetValue(playerData);
-                        if (idValue != null && !string.IsNullOrEmpty(idValue.ToString()))
-                        {
-                            return true;
-                        }
-                    }
-                }
-            }
+            AttachThread();
+            return _appModelInstance!.GetValue(null);
         }
         catch (Exception ex)
         {
-            _logger?.LogError($"Error checking IsInGame: {ex}");
+            _logger?.LogDebug($"AppModel not available yet: {ex.GetBaseException().Message}");
+            return null;
         }
-
-        return false;
     }
 
     /// <summary>
-    /// Gets the current game build version.
+    /// The logged-in player's Raid user ID, or null while no player is logged in.
+    /// </summary>
+    public static long? GetUserId()
+    {
+        var appModel = GetAppModel();
+        if (appModel == null || _userId == null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var id = Convert.ToInt64(_userId.GetValue(appModel));
+            return id > 0 ? id : null;
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning($"Could not read AppModel.UserId: {ex.GetBaseException().Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Whether a player is logged in and the game's model is up.
+    /// </summary>
+    public static bool IsInGame() => GetUserId() != null;
+
+    /// <summary>
+    /// The game client's version (AppModel.ClientVersion), falling back to Unity's Application.version.
     /// </summary>
     public static string GetGameBuild()
     {
-        try
+        var appModel = GetAppModel();
+        if (appModel != null && _clientVersion != null)
         {
-            if (_gameBuildProperty != null)
+            try
             {
-                var instance = _versionType != null ? GetVersionInstance() : GetGameStateInstance();
-                if (instance != null)
+                var version = FormatAppVersion(_clientVersion.GetValue(appModel));
+                if (!string.IsNullOrEmpty(version))
                 {
-                    var value = _gameBuildProperty.GetValue(instance);
-                    if (value is string version && !string.IsNullOrEmpty(version))
-                    {
-                        return version;
-                    }
+                    return version;
                 }
             }
-
-            if (_getGameBuildMethod != null)
+            catch (Exception ex)
             {
-                var instance = GetVersionInstance();
-                if (instance != null)
-                {
-                    var result = _getGameBuildMethod.Invoke(instance, null);
-                    if (result is string version && !string.IsNullOrEmpty(version))
-                    {
-                        return version;
-                    }
-                }
-            }
-
-            // Fallback: try to get from Application.version (Unity)
-            if (_unityEngine != null)
-            {
-                var appType = _unityEngine.GetType("UnityEngine.Application");
-                if (appType != null)
-                {
-                    var versionProperty = appType.GetProperty("version",
-                        BindingFlags.Public | BindingFlags.Static);
-                    if (versionProperty != null)
-                    {
-                        var value = versionProperty.GetValue(null);
-                        if (value is string version)
-                        {
-                            return $"Unity-{version}";
-                        }
-                    }
-                }
+                _logger?.LogWarning($"Could not read AppModel.ClientVersion: {ex.GetBaseException().Message}");
             }
         }
-        catch (Exception ex)
-        {
-            _logger?.LogError($"Error getting game build: {ex}");
-        }
 
-        return "unknown";
-    }
-
-    private static object? GetGameStateInstance()
-    {
-        if (_gameStateType == null) return null;
-
-        var instanceProperty = _gameStateType.GetProperty("Instance",
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-        if (instanceProperty != null)
-        {
-            return instanceProperty.GetValue(null);
-        }
-
-        return null;
-    }
-
-    private static object? GetVersionInstance()
-    {
-        if (_versionType == null) return null;
-
-        var instanceProperty = _versionType.GetProperty("Instance",
-            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-        if (instanceProperty != null)
-        {
-            return instanceProperty.GetValue(null);
-        }
-
-        return null;
+        return GetUnityApplicationVersion() ?? "unknown";
     }
 
     /// <summary>
-    /// Gets the current number of accumulated gems in the Gem Mine.
+    /// Not mapped to Raid's real types yet; always -1 (failure).
     /// </summary>
     public static int GetAccumulatedGems()
     {
-        try
-        {
-            if (_gemMineGemsProperty != null && _gemMineType != null)
-            {
-                // Try to get the Gem Mine instance
-                var instance = GetGemMineInstance();
-                if (instance != null)
-                {
-                    var value = _gemMineGemsProperty.GetValue(instance);
-                    if (value is int gems)
-                    {
-                        return gems;
-                    }
-                }
-            }
-
-            // Fallback: try to get from PlayerData
-            if (_playerDataType != null && _getPlayerDataMethod != null)
-            {
-                var playerData = _getPlayerDataMethod.Invoke(null, null);
-                if (playerData != null)
-                {
-                    var gemMineProperty = _playerDataType.GetProperty("GemMine",
-                        BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                    if (gemMineProperty != null)
-                    {
-                        var gemMine = gemMineProperty.GetValue(playerData);
-                        if (gemMine != null)
-                        {
-                            var gemsProperty = gemMine.GetType().GetProperty("Gems",
-                                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
-                            if (gemsProperty != null)
-                            {
-                                var value = gemsProperty.GetValue(gemMine);
-                                if (value is int gems)
-                                {
-                                    return gems;
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError($"Error getting accumulated gems: {ex}");
-        }
-
-        return 0;
+        _logger?.LogWarning("Gem Mine is not mapped to Raid's game types yet");
+        return -1;
     }
 
     /// <summary>
-    /// Collects the accumulated gems from the Gem Mine.
+    /// Not mapped to Raid's real types yet; always -1 (failure).
     /// </summary>
-    /// <returns>The number of gems collected, or -1 if collection failed.</returns>
     public static int CollectGemMine()
     {
-        try
+        _logger?.LogWarning("Gem Mine is not mapped to Raid's game types yet");
+        return -1;
+    }
+
+    private static bool TryInitialize()
+    {
+        if (_initialized)
         {
-            var gemsBefore = GetAccumulatedGems();
-            
-            if (gemsBefore == 0)
-            {
-                _logger?.LogInfo("Gem Mine has no gems to collect");
-                return 0; // Nothing to collect
-            }
-
-            if (_collectGemMineMethod != null)
-            {
-                var instance = GetGemMineInstance();
-                if (instance != null)
-                {
-                    _collectGemMineMethod.Invoke(instance, null);
-                    
-                    // Give the game a moment to process
-                    System.Threading.Thread.Sleep(100);
-                    
-                    var gemsAfter = GetAccumulatedGems();
-                    var collected = gemsBefore - gemsAfter;
-                    
-                    if (collected > 0)
-                    {
-                        _logger?.LogInfo($"Collected {collected} gems from Gem Mine");
-                        return collected;
-                    }
-                    else
-                    {
-                        _logger?.LogWarning("Collect method called but no gems were collected");
-                        return gemsBefore; // Assume all were collected
-                    }
-                }
-            }
-
-            _logger?.LogError("Could not find Gem Mine collect method");
-            return -1;
+            return true;
         }
-        catch (Exception ex)
+
+        lock (InitLock)
         {
-            _logger?.LogError($"Error collecting Gem Mine: {ex}");
-            return -1;
+            if (_initialized)
+            {
+                return true;
+            }
+
+            try
+            {
+                var appModelType = FindGameType(AppModelTypeName);
+                var singleInstanceType = FindGameType(SingleInstanceTypeName);
+                if (appModelType == null || singleInstanceType == null)
+                {
+                    _logger?.LogWarning($"Raid types not found yet (AppModel: {appModelType != null}, SingleInstance: {singleInstanceType != null})");
+                    return false;
+                }
+
+                var appModelHolder = singleInstanceType.MakeGenericType(appModelType);
+                _appModelInstance = appModelHolder.GetProperty("Instance", AnyStatic)
+                    ?? appModelHolder.GetProperty("_instance", AnyStatic);
+                if (_appModelInstance == null)
+                {
+                    _logger?.LogError("SingleInstance<AppModel> has no Instance property");
+                    return false;
+                }
+
+                _userId = appModelType.GetProperty("UserId", AnyInstance);
+                _clientVersion = appModelType.GetProperty("ClientVersion", AnyInstance);
+
+                _initialized = true;
+                _logger?.LogInfo(
+                    $"GameAccess hooked into {appModelType.Assembly.GetName().Name}: AppModel " +
+                    $"(UserId: {_userId != null}, ClientVersion: {_clientVersion != null})");
+                return true;
+            }
+            catch (Exception ex)
+            {
+                _logger?.LogError($"Failed to initialize GameAccess: {ex}");
+                return false;
+            }
         }
     }
 
-    private static object? GetGemMineInstance()
+    /// <summary>
+    /// Finds a type in Raid's interop assemblies (the ones BepInEx generated from the game, named Unity.*).
+    /// </summary>
+    private static Type? FindGameType(string fullName)
     {
-        // Try to get from UI Manager
-        if (_uiManagerType != null && _getGemMineControllerMethod != null)
+        foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
-            var uiManagerInstance = _uiManagerType.GetProperty("Instance",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)?.GetValue(null);
-            if (uiManagerInstance != null)
+            var name = assembly.GetName().Name ?? string.Empty;
+            if (!name.StartsWith("Unity.", StringComparison.Ordinal))
             {
-                return _getGemMineControllerMethod.Invoke(uiManagerInstance, null);
+                continue;
+            }
+
+            var type = assembly.GetType(fullName, throwOnError: false);
+            if (type != null)
+            {
+                return type;
             }
         }
 
-        // Try to get from GemMineController static Instance
-        if (_gemMineType != null)
+        // Interop assemblies load lazily; Raid keeps its app layer in these
+        foreach (var assemblyName in new[] { "Unity.Model", "Unity.App" })
         {
-            var instanceProperty = _gemMineType.GetProperty("Instance",
-                BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static);
-            if (instanceProperty != null)
+            try
             {
-                return instanceProperty.GetValue(null);
+                var type = Assembly.Load(assemblyName).GetType(fullName, throwOnError: false);
+                if (type != null)
+                {
+                    return type;
+                }
+            }
+            catch (Exception ex) when (ex is FileNotFoundException or FileLoadException or BadImageFormatException)
+            {
+                _logger?.LogDebug($"Could not load {assemblyName}: {ex.Message}");
             }
         }
 
         return null;
     }
 
-    public static bool IsInitialized => _initialized;
+    /// <summary>
+    /// ClientVersion is a Client.App.Settings.AppVersion; its interop proxy's ToString() gives only the type name.
+    /// </summary>
+    private static string? FormatAppVersion(object? appVersion)
+    {
+        if (appVersion == null)
+        {
+            return null;
+        }
+
+        var type = appVersion.GetType();
+        object? Part(string name) => type.GetProperty(name, AnyInstance)?.GetValue(appVersion);
+        var (major, minor, build) = (Part("Major"), Part("Minor"), Part("Build"));
+        return major != null && minor != null && build != null ? $"{major}.{minor}.{build}" : null;
+    }
+
+    private static string? GetUnityApplicationVersion()
+    {
+        try
+        {
+            AttachThread();
+            var application = Assembly.Load("UnityEngine.CoreModule").GetType("UnityEngine.Application");
+            return application?.GetProperty("version", AnyStatic)?.GetValue(null)?.ToString();
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug($"Could not read Application.version: {ex.GetBaseException().Message}");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// IL2CPP objects may only be touched from threads the IL2CPP runtime knows about.
+    /// </summary>
+    private static void AttachThread() => IL2CPP.il2cpp_thread_attach(IL2CPP.il2cpp_domain_get());
 }

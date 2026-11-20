@@ -13,26 +13,25 @@ using System.Text.Json;
 /// <summary>
 /// Unit tests for PluginHealthClient.
 /// </summary>
-public sealed class PluginHealthClientTests
+public sealed class PluginHealthClientTests : IDisposable
 {
+    private readonly string _instancesDirectory = Path.Combine(Path.GetTempPath(), "raider-instances-" + Guid.NewGuid().ToString("N"));
     private readonly HttpMessageHandlerMock _handlerMock;
-    private readonly HttpClient _httpClient;
     private readonly PluginHealthClient _client;
 
     public PluginHealthClientTests()
     {
         _handlerMock = new HttpMessageHandlerMock();
-        _httpClient = new HttpClient(_handlerMock)
+        new Raider.Shared.InstanceRegistration(1234, 50123, DateTimeOffset.UtcNow).WriteTo(_instancesDirectory);
+        _client = new PluginHealthClient(new PluginConnection(_instancesDirectory), _handlerMock);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_instancesDirectory))
         {
-            BaseAddress = new Uri("http://127.0.0.1:51837/raider/"),
-            Timeout = TimeSpan.FromSeconds(5)
-        };
-        _client = new PluginHealthClient(51837);
-        
-        // Replace the internal HttpClient with our mocked one via reflection
-        var field = typeof(PluginHealthClient).GetField("_httpClient", 
-            System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance);
-        field?.SetValue(_client, _httpClient);
+            Directory.Delete(_instancesDirectory, recursive: true);
+        }
     }
 
     [Fact]

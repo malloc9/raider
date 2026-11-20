@@ -41,9 +41,6 @@ public sealed partial class AccountItemViewModel : ObservableObject
     [ObservableProperty]
     private string _status;
 
-    [ObservableProperty]
-    private bool _needsManualLogin;
-
     public Account ToAccount() => new(
         Id,
         PlariumLogin,

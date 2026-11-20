@@ -19,6 +19,14 @@
 
   <ItemGroup>
     <ProjectReference Include="..\Raider.Core\Raider.Core.csproj" />
+    <!-- Build the in-game plugin first; it is shipped as a file, not referenced -->
+    <ProjectReference Include="..\Raider.Plugin\Raider.Plugin.csproj" ReferenceOutputAssembly="false" SkipGetTargetFrameworkProperties="true" GlobalPropertiesToRemove="TargetFramework;RuntimeIdentifier;SelfContained" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The installer copies this into the game's BepInEx\plugins folder -->
+    <None Include="..\Raider.Plugin\bin\$(Configuration)\net6.0\Raider.Plugin.dll" Link="plugin\Raider.Plugin.dll"
+          CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" ExcludeFromSingleFile="true" Visible="false" />
   </ItemGroup>
 
   <ItemGroup>

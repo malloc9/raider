@@ -1,7 +1,7 @@
 namespace Raider.Core.Models;
 
 /// <summary>
-/// One execution of an Account's Routine, from switching to that Account to its summary of each Chore's outcome.
+/// One execution of an Account's Routine, from attaching to that Account's Instance to its summary of each Chore's outcome.
 /// </summary>
 public sealed record Run(
     string Id,
@@ -16,10 +16,7 @@ public sealed record Run(
     string? StatusMessage = null
 )
 {
-    public bool HasFailures => Status == RunStatus.SwitchFailed || Results.Any(r => r.IsFailure);
-
-    /// <summary>The Run stopped before any Chore because the Account switch needs the player to log in by hand.</summary>
-    public bool NeedsManualLogin => Status == RunStatus.NeedsManualLogin;
+    public bool HasFailures => Results.Any(r => r.IsFailure);
 
     public bool IsGameBuildMismatch => !TargetedGameBuild.Matches(ActualGameBuild);
 
@@ -37,12 +34,6 @@ public sealed record Run(
 /// </summary>
 public enum RunStatus
 {
-    /// <summary>The Account was active (or switched to) and every Chore in the Routine was attempted.</summary>
-    Completed,
-
-    /// <summary>The Account switch needs a password; the Run stopped and the player must log in by hand.</summary>
-    NeedsManualLogin,
-
-    /// <summary>The Account switch failed for another reason; no Chore was attempted.</summary>
-    SwitchFailed
+    /// <summary>Every Chore in the Routine was attempted.</summary>
+    Completed
 }

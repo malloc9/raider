@@ -1,160 +1,219 @@
 namespace Raider.Tests.Integration;
 
-using Raider.Core.Models;
-using Raider.Core.Services;
-using Xunit;
-using FluentAssertions;
-using System.IO;
-using Microsoft.Extensions.Logging;
+using System.IO.Compression;
+using System.Net;
+using System.Net.Http;
 using Moq;
 
 /// <summary>
-/// Integration tests for PluginInstallerService against a temporary game folder.
+/// PluginInstallerService against a temporary game folder and a fake BepInEx package laid out like the real one.
 /// </summary>
-public sealed class PluginInstallerIntegrationTests
+public sealed class PluginInstallerIntegrationTests : IDisposable
 {
+    private readonly string _root = Path.Combine(Path.GetTempPath(), "raider-tests", Guid.NewGuid().ToString());
+    private readonly string _gamePath;
+    private readonly string _pluginDll;
+    private readonly GameInstallation _installation;
+    private readonly FakePackageProvider _packageProvider;
     private readonly PluginInstallerService _service;
-    private readonly Mock<ILogger<PluginInstallerService>> _loggerMock;
-    private string _tempGamePath = string.Empty;
 
     public PluginInstallerIntegrationTests()
     {
-        _loggerMock = new Mock<ILogger<PluginInstallerService>>();
-        _service = new PluginInstallerService(_loggerMock.Object);
+        _gamePath = Path.Combine(_root, "game");
+        Directory.CreateDirectory(Path.Combine(_gamePath, "Raid_Data", "il2cpp_data"));
+        File.WriteAllText(Path.Combine(_gamePath, "Raid.exe"), "exe");
+
+        _pluginDll = Path.Combine(_root, "app", "plugin", "Raider.Plugin.dll");
+        Directory.CreateDirectory(Path.GetDirectoryName(_pluginDll)!);
+        File.WriteAllText(_pluginDll, "plugin");
+
+        _packageProvider = new FakePackageProvider(CreateFakeBepInExZip(Path.Combine(_root, "bepinex.zip")));
+        _service = new PluginInstallerService(new Mock<ILogger<PluginInstallerService>>().Object, _packageProvider, _pluginDll);
+
+        _installation = new GameInstallation(_gamePath, Path.Combine(_gamePath, "Raid.exe"), Path.Combine(_gamePath, "Raid_Data"), true);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_root))
+            Directory.Delete(_root, recursive: true);
     }
 
     [Fact]
-    public async Task InstallAsync_InstallsPluginAndBepInEx_IntoCleanGameFolder()
+    public async Task Install_PutsBepInExLoaderAndPluginIntoGameFolder()
     {
-        // Arrange: Create a clean temporary game folder
-        _tempGamePath = Path.Combine(Path.GetTempPath(), "raider-test-install-" + Guid.NewGuid());
-        Directory.CreateDirectory(_tempGamePath);
-        Directory.CreateDirectory(Path.Combine(_tempGamePath, "Raid_Data"));
-        File.WriteAllText(Path.Combine(_tempGamePath, "Raid.exe"), "dummy exe");
+        var result = await _service.InstallAsync(_installation, "token-123");
 
-        var installation = new GameInstallation(
-            GamePath: _tempGamePath,
-            ExecutablePath: Path.Combine(_tempGamePath, "Raid.exe"),
-            DataPath: Path.Combine(_tempGamePath, "Raid_Data"),
-            IsPlariumPlay: false);
-
-        var token = "test-token-12345";
-
-        // Act
-        var result = await _service.InstallAsync(installation, token);
-
-        // Assert
-        result.Success.Should().BeTrue();
-        result.State.Should().Be(PluginInstallState.Installed);
-        result.InstalledPluginVersion.Should().Be("1.0.0");
-        result.InstalledBepInExVersion.Should().Be("6.0.0-pre.1");
-
-        // Verify files were created
-        File.Exists(Path.Combine(_tempGamePath, "BepInEx", "plugins", "Raider.Plugin.dll.placeholder")).Should().BeTrue();
-        File.Exists(Path.Combine(_tempGamePath, "BepInEx", "core", "version.txt")).Should().BeTrue();
-        File.Exists(Path.Combine(_tempGamePath, "doorstop_config.ini")).Should().BeTrue();
-        File.Exists(Path.Combine(_tempGamePath, "raider.token")).Should().BeTrue();
-        
-        // Verify token file content
-        var tokenContent = await File.ReadAllTextAsync(Path.Combine(_tempGamePath, "raider.token"));
-        tokenContent.Should().Be(token);
-
-        // Verify BepInEx config contains token
-        var configContent = await File.ReadAllTextAsync(Path.Combine(_tempGamePath, "BepInEx", "config", "BepInEx.cfg"));
-        configContent.Should().Contain($"HealthToken = {token}");
-        configContent.Should().Contain("HealthPort = 51837");
-
-        // Cleanup
-        Directory.Delete(_tempGamePath, true);
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        result.InstalledBepInExVersion.Should().Be(BepInExBuild.Version);
+        File.Exists(Path.Combine(_gamePath, "winhttp.dll")).Should().BeTrue();
+        File.Exists(Path.Combine(_gamePath, "doorstop_config.ini")).Should().BeTrue();
+        File.Exists(Path.Combine(_gamePath, "BepInEx", "core", "BepInEx.Unity.IL2CPP.dll")).Should().BeTrue();
+        File.Exists(Path.Combine(_gamePath, "dotnet", "coreclr.dll")).Should().BeTrue();
+        File.ReadAllText(Path.Combine(_gamePath, "BepInEx", "plugins", "Raider.Plugin.dll")).Should().Be("plugin");
     }
 
     [Fact]
-    public async Task GetInstallStateAsync_ReturnsInstalled_AfterInstallation()
+    public async Task Install_WritesTokenWhereThePluginReadsIt()
     {
-        // Arrange
-        _tempGamePath = Path.Combine(Path.GetTempPath(), "raider-test-state-" + Guid.NewGuid());
-        Directory.CreateDirectory(_tempGamePath);
-        Directory.CreateDirectory(Path.Combine(_tempGamePath, "Raid_Data"));
-        File.WriteAllText(Path.Combine(_tempGamePath, "Raid.exe"), "dummy exe");
+        await _service.InstallAsync(_installation, "token-123");
 
-        var installation = new GameInstallation(
-            GamePath: _tempGamePath,
-            ExecutablePath: Path.Combine(_tempGamePath, "Raid.exe"),
-            DataPath: Path.Combine(_tempGamePath, "Raid_Data"),
-            IsPlariumPlay: false);
-
-        var token = "test-token-state";
-
-        // Act: Install first
-        await _service.InstallAsync(installation, token);
-
-        // Act: Check state
-        var state = await _service.GetInstallStateAsync(installation);
-
-        // Assert
-        state.Should().Be(PluginInstallState.Installed);
-
-        // Cleanup
-        Directory.Delete(_tempGamePath, true);
+        var pluginConfig = File.ReadAllText(Path.Combine(_gamePath, "BepInEx", "config", "com.malloc9.raider.cfg"));
+        pluginConfig.Should().Contain("[Raider.Plugin]");
+        pluginConfig.Should().Contain("HealthToken = token-123");
+        pluginConfig.Should().NotContain("HealthPort");
+        File.ReadAllText(Path.Combine(_gamePath, "raider.token")).Should().Be("token-123");
     }
 
     [Fact]
-    public async Task GetOrCreateTokenAsync_GeneratesToken_AndPersistsIt()
+    public async Task Install_Fails_WhenPluginDllIsMissing()
     {
-        // Arrange
-        _tempGamePath = Path.Combine(Path.GetTempPath(), "raider-test-token-" + Guid.NewGuid());
-        Directory.CreateDirectory(_tempGamePath);
-        Directory.CreateDirectory(Path.Combine(_tempGamePath, "Raid_Data"));
-        File.WriteAllText(Path.Combine(_tempGamePath, "Raid.exe"), "dummy exe");
+        File.Delete(_pluginDll);
 
-        var installation = new GameInstallation(
-            GamePath: _tempGamePath,
-            ExecutablePath: Path.Combine(_tempGamePath, "Raid.exe"),
-            DataPath: Path.Combine(_tempGamePath, "Raid_Data"),
-            IsPlariumPlay: false);
+        var result = await _service.InstallAsync(_installation, "token-123");
 
-        // Act
-        var token1 = await _service.GetOrCreateTokenAsync(installation);
-        var token2 = await _service.GetOrCreateTokenAsync(installation);
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Raider plugin not found");
+        _packageProvider.Calls.Should().Be(0);
+    }
 
-        // Assert
+    [Fact]
+    public async Task Install_Fails_WhenPackageCannotBeObtained()
+    {
+        var service = new PluginInstallerService(
+            new Mock<ILogger<PluginInstallerService>>().Object,
+            new ThrowingPackageProvider(new HttpRequestException("offline")),
+            _pluginDll);
+
+        var result = await service.InstallAsync(_installation, "token-123");
+
+        result.Success.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("offline");
+    }
+
+    [Fact]
+    public async Task Install_RemovesPlaceholderLeftoversFromEarlierVersions()
+    {
+        // What the old placeholder installer left behind
+        Directory.CreateDirectory(Path.Combine(_gamePath, "BepInEx", "core"));
+        Directory.CreateDirectory(Path.Combine(_gamePath, "BepInEx", "plugins"));
+        Directory.CreateDirectory(Path.Combine(_gamePath, "BepInEx", "config"));
+        File.WriteAllText(Path.Combine(_gamePath, "BepInEx", "core", "version.txt"), "6.0.0-pre.1");
+        File.WriteAllText(Path.Combine(_gamePath, "BepInEx", "plugins", "Raider.Plugin.dll.placeholder"), "x");
+        File.WriteAllText(Path.Combine(_gamePath, "BepInEx", "config", "BepInEx.cfg"), "[Raider.Plugin]\nHealthToken = old");
+
+        await _service.InstallAsync(_installation, "token-123");
+
+        File.Exists(Path.Combine(_gamePath, "BepInEx", "core", "version.txt")).Should().BeFalse();
+        File.Exists(Path.Combine(_gamePath, "BepInEx", "plugins", "Raider.Plugin.dll.placeholder")).Should().BeFalse();
+        File.Exists(Path.Combine(_gamePath, "BepInEx", "config", "BepInEx.cfg")).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task InstallState_IsInstalled_AfterRealInstall()
+    {
+        await _service.InstallAsync(_installation, "token-123");
+
+        (await _service.GetInstallStateAsync(_installation)).Should().Be(PluginInstallState.Installed);
+    }
+
+    [Fact]
+    public async Task InstallState_IsNotInstalled_ForPlaceholderOnlyFolder()
+    {
+        Directory.CreateDirectory(Path.Combine(_gamePath, "BepInEx", "plugins"));
+        File.WriteAllText(Path.Combine(_gamePath, "BepInEx", "plugins", "Raider.Plugin.dll.placeholder"), "x");
+        File.WriteAllText(Path.Combine(_gamePath, "raider.token"), "t");
+
+        (await _service.GetInstallStateAsync(_installation)).Should().Be(PluginInstallState.NotInstalled);
+    }
+
+    [Fact]
+    public async Task Uninstall_RemovesEverythingTheInstallAdded()
+    {
+        await _service.InstallAsync(_installation, "token-123");
+
+        (await _service.UninstallAsync(_installation)).Should().BeTrue();
+
+        Directory.Exists(Path.Combine(_gamePath, "BepInEx")).Should().BeFalse();
+        Directory.Exists(Path.Combine(_gamePath, "dotnet")).Should().BeFalse();
+        File.Exists(Path.Combine(_gamePath, "winhttp.dll")).Should().BeFalse();
+        File.Exists(Path.Combine(_gamePath, "doorstop_config.ini")).Should().BeFalse();
+        File.Exists(Path.Combine(_gamePath, "raider.token")).Should().BeFalse();
+        File.Exists(Path.Combine(_gamePath, "Raid.exe")).Should().BeTrue("the game itself is untouched");
+    }
+
+    [Fact]
+    public async Task GetOrCreateToken_GeneratesOnceAndPersists()
+    {
+        var token1 = await _service.GetOrCreateTokenAsync(_installation);
+        var token2 = await _service.GetOrCreateTokenAsync(_installation);
+
         token1.Should().NotBeNullOrEmpty();
-        token2.Should().Be(token1); // Should return the same token
-
-        // Cleanup
-        Directory.Delete(_tempGamePath, true);
+        token2.Should().Be(token1);
     }
 
     [Fact]
-    public async Task UninstallAsync_RemovesPluginAndToken()
+    public async Task PackageProvider_RejectsDownloadWithWrongHash()
     {
-        // Arrange
-        _tempGamePath = Path.Combine(Path.GetTempPath(), "raider-test-uninstall-" + Guid.NewGuid());
-        Directory.CreateDirectory(_tempGamePath);
-        Directory.CreateDirectory(Path.Combine(_tempGamePath, "Raid_Data"));
-        File.WriteAllText(Path.Combine(_tempGamePath, "Raid.exe"), "dummy exe");
+        var handler = new StaticHandler(new byte[] { 1, 2, 3 });
+        var provider = new DownloadingBepInExPackageProvider(Path.Combine(_root, "cache"), new HttpClient(handler));
 
-        var installation = new GameInstallation(
-            GamePath: _tempGamePath,
-            ExecutablePath: Path.Combine(_tempGamePath, "Raid.exe"),
-            DataPath: Path.Combine(_tempGamePath, "Raid_Data"),
-            IsPlariumPlay: false);
+        var act = () => provider.GetPackageAsync();
 
-        var token = "test-token-uninstall";
+        await act.Should().ThrowAsync<InvalidDataException>();
+        File.Exists(Path.Combine(_root, "cache", BepInExBuild.FileName)).Should().BeFalse();
+    }
 
-        // Act: Install first
-        await _service.InstallAsync(installation, token);
+    private static string CreateFakeBepInExZip(string zipPath)
+    {
+        using var zip = ZipFile.Open(zipPath, ZipArchiveMode.Create);
+        foreach (var entry in new[]
+                 {
+                     "winhttp.dll", "doorstop_config.ini", ".doorstop_version", "changelog.txt",
+                     "BepInEx/core/BepInEx.Unity.IL2CPP.dll", "BepInEx/core/BepInEx.Core.dll",
+                     "dotnet/coreclr.dll",
+                 })
+        {
+            using var writer = new StreamWriter(zip.CreateEntry(entry).Open());
+            writer.Write(entry);
+        }
 
-        // Act: Uninstall
-        var uninstalled = await _service.UninstallAsync(installation);
+        zip.CreateEntry("BepInEx/plugins/");
+        return zipPath;
+    }
 
-        // Assert
-        uninstalled.Should().BeTrue();
-        Directory.Exists(Path.Combine(_tempGamePath, "BepInEx")).Should().BeFalse();
-        File.Exists(Path.Combine(_tempGamePath, "raider.token")).Should().BeFalse();
-        File.Exists(Path.Combine(_tempGamePath, "doorstop_config.ini")).Should().BeFalse();
+    private sealed class FakePackageProvider : IBepInExPackageProvider
+    {
+        private readonly string _zipPath;
 
-        // Cleanup
-        Directory.Delete(_tempGamePath, true);
+        public FakePackageProvider(string zipPath) => _zipPath = zipPath;
+
+        public int Calls { get; private set; }
+
+        public Task<string> GetPackageAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+        {
+            Calls++;
+            return Task.FromResult(_zipPath);
+        }
+    }
+
+    private sealed class ThrowingPackageProvider : IBepInExPackageProvider
+    {
+        private readonly Exception _exception;
+
+        public ThrowingPackageProvider(Exception exception) => _exception = exception;
+
+        public Task<string> GetPackageAsync(IProgress<string>? progress = null, CancellationToken cancellationToken = default)
+            => Task.FromException<string>(_exception);
+    }
+
+    private sealed class StaticHandler : HttpMessageHandler
+    {
+        private readonly byte[] _body;
+
+        public StaticHandler(byte[] body) => _body = body;
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+            => Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(_body) });
     }
 }

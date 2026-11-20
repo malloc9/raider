@@ -5,8 +5,12 @@ A Windows desktop tool that drives Raid: Shadow Legends accounts on the Plarium 
 ## Language
 
 **Account**:
-One Raid: Shadow Legends player profile, reached by logging into Plarium Play with one Plarium login.
+One Raid: Shadow Legends player profile, identified by its Raid player ID.
 _Avoid_: Profile, user, player
+
+**Instance**:
+One running Raid process, logged into one Account. The player starts Instances (several at once, with another tool); Raider discovers and drives them.
+_Avoid_: Client, window, game copy
 
 **Chore**:
 One self-contained piece of routine in-game work, such as claiming playtime rewards or collecting the Gem Mine.
@@ -17,16 +21,12 @@ The ordered list of Chores configured for one Account.
 _Avoid_: Daily, script, macro
 
 **Run**:
-One execution of an Account's Routine, from switching to that Account to its summary of each Chore's outcome.
+One execution of an Account's Routine in the Instance where that Account is logged in, ending in a summary of each Chore's outcome.
 _Avoid_: Session, pass, cycle
 
 **Game day**:
 The period between two of Raid's daily resets; each Account gets at most one scheduled Run per Game day.
 _Avoid_: Day, reset period
-
-**Account switch**:
-Changing which Account the running game is logged into, using logins Plarium Play already remembers.
-_Avoid_: Login, relog
 
 ## Chores
 
