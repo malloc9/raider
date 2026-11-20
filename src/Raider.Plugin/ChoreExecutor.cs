@@ -23,7 +23,7 @@ internal sealed class ChoreExecutor
         _choreHandlers = new Dictionary<string, IChoreHandler>(StringComparer.OrdinalIgnoreCase)
         {
             { "ClanCheckIn", new ClanCheckInChoreHandler() },
-            // Other chore handlers will be added here
+            { "BuyFreeMarketItems", new BuyFreeMarketItemsChoreHandler() },
         };
     }
 
