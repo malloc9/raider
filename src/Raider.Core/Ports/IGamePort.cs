@@ -38,5 +38,6 @@ public interface IGamePort
 /// </summary>
 public sealed record ChoreExecutionResult(
     bool Success,
-    string? ErrorMessage = null
+    string? ErrorMessage = null,
+    object? Data = null
 );
