@@ -1,166 +1,116 @@
 namespace Raider.Plugin.Chores;
 
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using BepInEx.Logging;
-using Raider.Plugin;
+using Raider.Plugin.Game;
+using static Raider.Plugin.Game.Il2CppReflection;
 
 /// <summary>
-/// Handles the Buy Free Market Items chore execution.
+/// Buy free Market items: takes Market items whose price is zero; nothing that costs silver or gems.
+/// <para>
+/// Game side: the Market is <c>UserWrapper.MagicShop</c> (Client.Model.Gameplay.MagicShop.MagicShopWrapper);
+/// <c>GetAvailableItems()</c> lists its MagicShopItems, each with a <c>Price</c> (SharedModel.Meta.Account.Resources);
+/// <c>BuyMagicShopItemCmd(itemId)</c> buys one. (The game's "BlackMarket" is the player's item inventory, not the
+/// Market.)
+/// </para>
+/// <para>
+/// Spending guard: an item counts as free only if its price reads as empty with zero silver, zero gems and no
+/// non-zero resource at all; anything unreadable counts as not free. The price is read again on the main thread
+/// immediately before the buy command is created.
+/// </para>
 /// </summary>
 internal sealed class BuyFreeMarketItemsChoreHandler : IChoreHandler
 {
-    private readonly ManualLogSource _log;
+    private const string Buy = "Client.Model.Gameplay.MagicShop.Commands.BuyMagicShopItemCmd";
 
-    public BuyFreeMarketItemsChoreHandler()
+    public Task<ChoreHandlerResult> ExecuteAsync(Dictionary<string, object>? parameters) =>
+        ChoreRun.ExecuteAsync("Buy free Market items", parameters, Plan);
+
+    private static ChorePlan Plan(object userWrapper)
     {
-        _log = RaiderPlugin.Log;
+        var market = GetRequired(userWrapper, "MagicShop");
+        var items = Items(Call(market, "GetAvailableItems")).ToList();
+        if (items.Count == 0)
+        {
+            return ChorePlan.Nothing("NoMarketItems");
+        }
+
+        var commands = new List<PlannedCommand>();
+        var seen = new List<object>();
+        foreach (var item in items)
+        {
+            var id = Convert.ToInt32(Get(item, "Id"));
+            var type = Get(item, "TypeId")?.ToString();
+            var price = Get(item, "Price");
+            var free = IsFree(price);
+            seen.Add(new { itemId = id, type, price = DescribePrice(price), free });
+            if (free)
+            {
+                commands.Add(new PlannedCommand(Buy, new object?[] { id }, new { itemId = id, type }, () => RecheckFree(id)));
+            }
+        }
+
+        var details = new { marketItems = seen };
+        return commands.Count == 0 ? ChorePlan.Nothing("NoFreeItems", details) : new ChorePlan(commands, "", details);
     }
 
-    public async Task<ChoreHandlerResult> ExecuteAsync(Dictionary<string, object>? parameters)
+    /// <summary>Runs on the main thread right before buying: the item must still be there and still cost nothing.</summary>
+    private static string? RecheckFree(int itemId)
     {
-        try
+        var market = GameAccess.GetUserWrapper() is { } userWrapper ? Get(userWrapper, "MagicShop") : null;
+        var item = market == null ? null : Call(market, "GetItem", itemId);
+        if (item == null)
         {
-            _log.LogInfo("Starting Buy Free Market Items chore");
-
-            // Step 1: Get the market items
-            var marketItems = await GetMarketItemsAsync();
-            if (marketItems == null || marketItems.Count == 0)
-            {
-                _log.LogInfo("Buy Free Market Items: No market items available - nothing to do");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "NothingToDo", reason = "NoMarketItems" });
-            }
-
-            _log.LogInfo($"Buy Free Market Items: Found {marketItems.Count} market items");
-
-            // Step 2: Filter for free items (price == 0)
-            var freeItems = marketItems.Where(item => item.Price == 0).ToList();
-            if (freeItems.Count == 0)
-            {
-                _log.LogInfo("Buy Free Market Items: No free items found - nothing to do");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "NothingToDo", reason = "NoFreeItems" });
-            }
-
-            _log.LogInfo($"Buy Free Market Items: Found {freeItems.Count} free items to take");
-
-            // Step 3: Take each free item
-            var takenItems = new List<object>();
-            foreach (var item in freeItems)
-            {
-                var takeResult = await TakeMarketItemAsync(item);
-                if (takeResult.Success)
-                {
-                    takenItems.Add(new
-                    {
-                        itemId = item.ItemId,
-                        itemName = item.ItemName,
-                        quantity = item.Quantity
-                    });
-                    _log.LogInfo($"Buy Free Market Items: Took {item.Quantity}x {item.ItemName} (ID: {item.ItemId})");
-                }
-                else
-                {
-                    _log.LogWarning($"Buy Free Market Items: Failed to take {item.ItemName} (ID: {item.ItemId}): {takeResult.ErrorMessage}");
-                }
-            }
-
-            if (takenItems.Count == 0)
-            {
-                _log.LogWarning("Buy Free Market Items: Failed to take any free items");
-                return new ChoreHandlerResult(
-                    false,
-                    "Failed to take any free market items");
-            }
-
-            _log.LogInfo($"Buy Free Market Items: Successfully took {takenItems.Count} free item(s)");
-            return new ChoreHandlerResult(
-                true,
-                null,
-                new { outcome = "Success", taken = takenItems });
+            return "the item is no longer in the Market";
         }
-        catch (Exception ex)
-        {
-            _log.LogError($"Buy Free Market Items chore failed with exception: {ex}");
-            return new ChoreHandlerResult(false, $"Exception: {ex.Message}");
-        }
+
+        return IsFree(Get(item, "Price")) ? null : "the item is no longer free";
     }
 
-    /// <summary>
-    /// Gets all available market items from the game.
-    /// </summary>
-    private async Task<List<MarketItem>?> GetMarketItemsAsync()
+    /// <summary>The price's non-zero resources, e.g. "Silver=25000", for the report.</summary>
+    private static string DescribePrice(object? price)
     {
-        await Task.Yield(); // Allow Unity main thread to process
+        if (price == null)
+        {
+            return "none";
+        }
 
         try
         {
-            // In the real implementation, this would access the game's market system via reflection
-            // Example:
-            // var marketController = MarketController.Instance;
-            // if (marketController == null) return null;
-            // return marketController.CurrentMarketItems.Select(ConvertToMarketItem).ToList();
-
-            // For now, return placeholder data - this needs actual game API integration
-            _log.LogWarning("GetMarketItemsAsync: Using placeholder - needs actual game API integration");
-            
-            // Simulate finding some market items for testing
-            // In reality, this would query the game's actual market
-            return new List<MarketItem>();
+            var parts = Items(Get(price, "RawValues"))
+                .Select(entry => (resource: Get(entry, "Key")?.ToString(), amount: Convert.ToDouble(Get(entry, "Value"))))
+                .Where(p => p.amount != 0)
+                .Select(p => $"{p.resource}={p.amount}");
+            var text = string.Join(", ", parts);
+            return text.Length == 0 ? "zero" : text;
         }
         catch (Exception ex)
         {
-            _log.LogError($"Error getting market items: {ex.Message}");
-            return null;
+            return $"unreadable ({ex.Message})";
         }
     }
 
-    /// <summary>
-    /// Takes a specific market item (purchases it for free).
-    /// </summary>
-    private async Task<TakeItemResult> TakeMarketItemAsync(MarketItem item)
+    private static bool IsFree(object? price)
     {
-        await Task.Yield();
+        if (price == null)
+        {
+            return true;
+        }
 
         try
         {
-            // In the real implementation, this would call the game's market purchase method
-            // Example:
-            // var marketController = MarketController.Instance;
-            // var result = await marketController.PurchaseItemAsync(item.ItemId);
-            // return new TakeItemResult(result.Success, result.ErrorMessage);
+            if (!Convert.ToBoolean(Call(price, "IsEmpty"))
+                || Convert.ToDouble(Get(price, "Silver")) != 0
+                || Convert.ToDouble(Get(price, "Gems")) != 0)
+            {
+                return false;
+            }
 
-            // Placeholder - needs actual game API integration
-            _log.LogWarning($"TakeMarketItemAsync: Using placeholder for item {item.ItemId} - needs actual game API integration");
-            return new TakeItemResult(false, "Not implemented - needs game API integration");
+            // Every resource the price lists must be zero
+            return Items(Get(price, "RawValues")).All(entry => Convert.ToDouble(Get(entry, "Value")) == 0);
         }
         catch (Exception ex)
         {
-            _log.LogError($"Error taking market item {item.ItemId}: {ex.Message}");
-            return new TakeItemResult(false, ex.Message);
+            RaiderPlugin.Log.LogWarning($"Could not read a Market price, treating it as not free: {ex.Message}");
+            return false;
         }
     }
-
-    /// <summary>
-    /// Represents a market item.
-    /// </summary>
-    private sealed class MarketItem
-    {
-        public string ItemId { get; init; } = string.Empty;
-        public string ItemName { get; init; } = string.Empty;
-        public int Quantity { get; init; }
-        public int Price { get; init; } // 0 = free, >0 = costs silver or gems
-        public string CurrencyType { get; init; } = string.Empty; // "Silver", "Gems", "Free"
-    }
-
-    /// <summary>
-    /// Result of taking a market item.
-    /// </summary>
-    private sealed record TakeItemResult(bool Success, string? ErrorMessage = null);
 }

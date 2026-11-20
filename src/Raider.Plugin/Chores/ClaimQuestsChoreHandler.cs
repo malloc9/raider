@@ -1,209 +1,82 @@
 namespace Raider.Plugin.Chores;
 
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using BepInEx.Logging;
-using Raider.Plugin;
+using static Raider.Plugin.Game.Il2CppReflection;
 
 /// <summary>
-/// Handles the Claim Quests chore execution.
-/// Collects every completed quest reward on the Daily, Weekly, Monthly and Advanced tabs,
-/// plus the Daily and Weekly progress chests.
+/// Claim quests: collects every completed quest reward on the Daily, Weekly, Monthly and Advanced tabs, plus the
+/// Daily and Weekly progress chests.
+/// <para>
+/// Game side, two sources:
+/// <list type="bullet">
+/// <item><c>UserWrapper.PeriodicQuests.PeriodicData.Groups</c>: one group per Daily / Weekly / Monthly
+/// (PeriodicQuestGroupId), each a list of UserPeriodicQuestStateData; a <c>Completed</c> one is claimed with
+/// <c>ClaimPeriodicQuestRewardCmd(questId)</c>.</item>
+/// <item><c>UserWrapper.Quests.QuestData.OpenedStates</c>: QuestState objects; a <c>Completed</c> one whose prize was
+/// not given, in the Periodic or AdvancedDaily category, is claimed with <c>ClaimQuestRewardCmd(questId)</c>.
+/// Other categories (events, tournaments, clan quests, passes) are outside this Chore and left alone.</item>
+/// </list>
+/// </para>
 /// </summary>
 internal sealed class ClaimQuestsChoreHandler : IChoreHandler
 {
-    private readonly ManualLogSource _log;
+    private const string ClaimPeriodic = "Client.Model.Gameplay.Quests.Commands.ClaimPeriodicQuestRewardCmd";
+    private const string ClaimQuest = "Client.Model.Gameplay.Quests.Commands.ClaimQuestRewardCmd";
 
-    public ClaimQuestsChoreHandler()
-    {
-        _log = RaiderPlugin.Log;
-    }
+    /// <summary>QuestCategoryId values this Chore claims through ClaimQuestRewardCmd.</summary>
+    private static readonly HashSet<string> ClaimedCategories = new(StringComparer.Ordinal) { "Periodic", "AdvancedDaily" };
 
-    public async Task<ChoreHandlerResult> ExecuteAsync(Dictionary<string, object>? parameters)
+    public Task<ChoreHandlerResult> ExecuteAsync(Dictionary<string, object>? parameters) =>
+        ChoreRun.ExecuteAsync("Claim quests", parameters, Plan);
+
+    private static ChorePlan Plan(object userWrapper)
     {
-        try
+        var commands = new List<PlannedCommand>();
+        var planned = new HashSet<int>();
+
+        var periodicData = Get(GetRequired(userWrapper, "PeriodicQuests"), "PeriodicData");
+        foreach (var group in Items(periodicData == null ? null : Get(periodicData, "Groups")))
         {
-            _log.LogInfo("Starting Claim Quests chore");
-
-            // Step 1: Get all quest rewards
-            var questRewards = await GetQuestRewardsAsync();
-            if (questRewards == null || questRewards.Count == 0)
+            var tab = Get(group, "GroupId")?.ToString();
+            foreach (var quest in Items(Get(group, "PeriodicQuestsData")))
             {
-                _log.LogInfo("Claim Quests: No quest rewards available - nothing to do");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "NothingToDo", reason = "NoQuestRewards" });
-            }
-
-            _log.LogInfo($"Claim Quests: Found {questRewards.Count} quest reward(s)");
-
-            // Step 2: Filter for completed quest rewards (ready to claim)
-            var readyRewards = questRewards.Where(reward => reward.IsCompleted && !reward.IsClaimed).ToList();
-            if (readyRewards.Count == 0)
-            {
-                _log.LogInfo("Claim Quests: No completed unclaimed quest rewards - nothing to do");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "NothingToDo", reason = "NoCompletedRewards" });
-            }
-
-            _log.LogInfo($"Claim Quests: Found {readyRewards.Count} completed unclaimed reward(s) to claim");
-
-            // Step 3: Claim each ready reward
-            var claimedRewards = new List<object>();
-            foreach (var reward in readyRewards)
-            {
-                var claimResult = await ClaimRewardAsync(reward);
-                if (claimResult.Success)
+                if (Get(quest, "QuestStateId")?.ToString() != "Completed")
                 {
-                    claimedRewards.Add(new
-                    {
-                        rewardId = reward.RewardId,
-                        questType = reward.QuestType,
-                        tab = reward.Tab,
-                        rewards = claimResult.Rewards
-                    });
-                    _log.LogInfo($"Claim Quests: Claimed {reward.QuestType} on {reward.Tab} tab (ID: {reward.RewardId})");
+                    continue;
                 }
-                else
+
+                var questId = Convert.ToInt32(Get(quest, "QuestId"));
+                if (planned.Add(questId))
                 {
-                    _log.LogWarning($"Claim Quests: Failed to claim {reward.QuestType} on {reward.Tab} tab (ID: {reward.RewardId}): {claimResult.ErrorMessage}");
+                    commands.Add(new PlannedCommand(ClaimPeriodic, new object?[] { questId }, new { questId, tab, kind = "Periodic" }));
                 }
-                
-                await Task.Yield(); // Allow Unity main thread to process between claims
             }
+        }
 
-            // Step 4: Also check and claim progress chests (Daily and Weekly)
-            var progressChestResults = await ClaimProgressChestsAsync();
-            claimedRewards.AddRange(progressChestResults);
-
-            if (claimedRewards.Count == 0)
+        var quests = GetRequired(userWrapper, "Quests");
+        var otherCompleted = new Dictionary<string, int>();
+        foreach (var state in Items(Get(GetRequired(quests, "QuestData"), "OpenedStates")))
+        {
+            if (Get(state, "StateId")?.ToString() != "Completed" || Convert.ToBoolean(Get(state, "PrizeGiven")))
             {
-                _log.LogWarning("Claim Quests: Attempted to claim rewards but none succeeded");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "NothingToDo", reason = "CollectionFailed" });
+                continue;
             }
 
-            _log.LogInfo($"Claim Quests: Successfully claimed {claimedRewards.Count} reward(s)");
-            return new ChoreHandlerResult(
-                true,
-                null,
-                new { outcome = "Success", claimed = claimedRewards, remaining = questRewards.Count - claimedRewards.Count });
+            var questId = Convert.ToInt32(Get(state, "QuestId"));
+            var category = Call(quests, "GetQuest", questId) is { } quest ? Get(quest, "CategoryId")?.ToString() ?? "?" : "?";
+            if (!ClaimedCategories.Contains(category))
+            {
+                otherCompleted[category] = otherCompleted.GetValueOrDefault(category) + 1;
+                continue;
+            }
+
+            if (planned.Add(questId))
+            {
+                commands.Add(new PlannedCommand(ClaimQuest, new object?[] { questId }, new { questId, tab = category, kind = "Quest" }));
+            }
         }
-        catch (Exception ex)
-        {
-            _log.LogError($"Claim Quests chore failed with exception: {ex}");
-            return new ChoreHandlerResult(false, $"Exception: {ex.Message}");
-        }
+
+        // Completed quests of other kinds are left for the player; listed so a missed category is easy to spot
+        var details = new { completedButNotClaimedByThisChore = otherCompleted };
+        return commands.Count == 0 ? ChorePlan.Nothing("NoCompletedQuests", details) : new ChorePlan(commands, "", details);
     }
-
-    /// <summary>
-    /// Gets all quest rewards from the game across all tabs.
-    /// </summary>
-    private async Task<List<QuestReward>?> GetQuestRewardsAsync()
-    {
-        await Task.Yield(); // Allow Unity main thread to process
-
-        try
-        {
-            // In the real implementation, this would access the game's quest system via reflection
-            // Example:
-            // var questController = QuestController.Instance;
-            // if (questController == null) return null;
-            // return questController.GetAllRewards().Select(ConvertToQuestReward).ToList();
-
-            // For now, return placeholder data - this needs actual game API integration
-            _log.LogWarning("GetQuestRewardsAsync: Using placeholder - needs actual game API integration");
-
-            return new List<QuestReward>();
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Error getting quest rewards: {ex.Message}");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Claims a specific quest reward.
-    /// </summary>
-    private async Task<ClaimRewardResult> ClaimRewardAsync(QuestReward reward)
-    {
-        await Task.Yield();
-
-        try
-        {
-            // In the real implementation, this would call the game's claim method
-            // Example:
-            // var questController = QuestController.Instance;
-            // var result = await questController.ClaimQuestRewardAsync(reward.RewardId);
-            // return new ClaimRewardResult(result.Success, result.Rewards, result.ErrorMessage);
-
-            // Placeholder - needs actual game API integration
-            _log.LogWarning($"ClaimRewardAsync: Using placeholder for reward {reward.RewardId} - needs actual game API integration");
-            return new ClaimRewardResult(false, null, "Not implemented - needs game API integration");
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Error claiming quest reward {reward.RewardId}: {ex.Message}");
-            return new ClaimRewardResult(false, null, ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Claims Daily and Weekly progress chests if available.
-    /// </summary>
-    private async Task<List<object>> ClaimProgressChestsAsync()
-    {
-        await Task.Yield();
-
-        var claimedChests = new List<object>();
-
-        try
-        {
-            // In the real implementation, this would check and claim progress chests
-            // Example:
-            // var questController = QuestController.Instance;
-            // if (questController.CanClaimDailyProgressChest)
-            // {
-            //     var result = await questController.ClaimDailyProgressChestAsync();
-            //     if (result.Success) claimedChests.Add(...);
-            // }
-            // Same for Weekly progress chest
-
-            _log.LogWarning("ClaimProgressChestsAsync: Using placeholder - needs actual game API integration");
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Error claiming progress chests: {ex.Message}");
-        }
-
-        return claimedChests;
-    }
-
-    /// <summary>
-    /// Represents a quest reward.
-    /// </summary>
-    private sealed class QuestReward
-    {
-        public string RewardId { get; init; } = string.Empty;
-        public string QuestType { get; init; } = string.Empty; // e.g., "Daily", "Weekly", "Monthly", "Advanced"
-        public string Tab { get; init; } = string.Empty; // e.g., "Daily", "Weekly", "Monthly", "Advanced"
-        public bool IsCompleted { get; init; }
-        public bool IsClaimed { get; init; }
-        public object? RawData { get; init; }
-    }
-
-    /// <summary>
-    /// Result of claiming a quest reward.
-    /// </summary>
-    private sealed record ClaimRewardResult(
-        bool Success,
-        object? Rewards = null,
-        string? ErrorMessage = null);
 }

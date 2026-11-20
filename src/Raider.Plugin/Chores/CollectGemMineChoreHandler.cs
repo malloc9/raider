@@ -1,79 +1,44 @@
 namespace Raider.Plugin.Chores;
 
-using System.Collections.Generic;
-using BepInEx.Logging;
-using Raider.Plugin;
-using Raider.Plugin.Game;
+using static Raider.Plugin.Game.Il2CppReflection;
 
 /// <summary>
-/// Handles the Collect Gem Mine chore execution.
-/// Collects the gems accumulated in the Gem Mine.
+/// Collect Gem Mine: takes the gems accumulated in the Gem Mine.
+/// <para>
+/// Game side: <c>UserWrapper.Village.ProducedGemsCount</c> is what the mine holds;
+/// <c>CollectGemsFromMineCmd()</c> takes it. The count read before collecting is reported as gems collected.
+/// </para>
 /// </summary>
 internal sealed class CollectGemMineChoreHandler : IChoreHandler
 {
-    private readonly ManualLogSource _log;
+    private const string Collect = "Client.Model.Gameplay.Village.Commands.CollectGemsFromMineCmd";
 
-    public CollectGemMineChoreHandler()
-    {
-        _log = RaiderPlugin.Log;
-    }
+    public Task<ChoreHandlerResult> ExecuteAsync(Dictionary<string, object>? parameters) =>
+        ChoreRun.ExecuteAsync("Collect Gem Mine", parameters, Plan);
 
-    public async Task<ChoreHandlerResult> ExecuteAsync(Dictionary<string, object>? parameters)
+    private static ChorePlan Plan(object userWrapper)
     {
+        var village = GetRequired(userWrapper, "Village");
+        var gems = Convert.ToInt32(Get(village, "ProducedGemsCount"));
+
+        // The Gem Mine unlocks only at a higher account level; a mine with no capacity is not built yet
+        int? capacity;
         try
         {
-            _log.LogInfo("Starting Collect Gem Mine chore");
-
-            if (!GameAccess.IsInitialized)
-            {
-                _log.LogError("GameAccess not initialized");
-                return new ChoreHandlerResult(false, "GameAccess not initialized");
-            }
-
-            // Check accumulated gems before collecting
-            var gemsBefore = GameAccess.GetAccumulatedGems();
-            
-            if (gemsBefore == 0)
-            {
-                _log.LogInfo("Collect Gem Mine: Gem Mine has no gems to collect - nothing to do");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "NothingToDo", reason = "NoGemsAccumulated", gemsCollected = 0 });
-            }
-
-            _log.LogInfo($"Collect Gem Mine: Found {gemsBefore} accumulated gems");
-
-            // Collect the gems
-            var collected = GameAccess.CollectGemMine();
-            
-            if (collected < 0)
-            {
-                _log.LogError("Collect Gem Mine: Failed to collect gems");
-                return new ChoreHandlerResult(false, "Failed to collect Gem Mine");
-            }
-
-            if (collected == 0)
-            {
-                // Method succeeded but no gems were collected (might be a timing issue)
-                // Report the gems that were available before as collected
-                _log.LogInfo($"Collect Gem Mine: Collection triggered, assuming {gemsBefore} gems collected");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "Success", gemsCollected = gemsBefore });
-            }
-
-            _log.LogInfo($"Collect Gem Mine: Successfully collected {collected} gems");
-            return new ChoreHandlerResult(
-                true,
-                null,
-                new { outcome = "Success", gemsCollected = collected });
+            capacity = Convert.ToInt32(Call(village, "GetGemsMineCapacity"));
         }
-        catch (Exception ex)
+        catch (Exception)
         {
-            _log.LogError($"Collect Gem Mine chore failed with exception: {ex}");
-            return new ChoreHandlerResult(false, $"Exception: {ex.Message}");
+            capacity = null;
         }
+
+        if (gems <= 0 && capacity is null or <= 0)
+        {
+            return ChorePlan.Nothing("GemMineNotUnlocked", new { capacity });
+        }
+
+        return gems <= 0
+            ? ChorePlan.Nothing("NoGemsAccumulated", new { capacity })
+            : new ChorePlan(new[] { new PlannedCommand(Collect, Array.Empty<object?>(), new { gems }, Gems: gems) }, "");
     }
 }

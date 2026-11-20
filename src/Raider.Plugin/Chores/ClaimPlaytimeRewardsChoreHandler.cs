@@ -1,174 +1,77 @@
 namespace Raider.Plugin.Chores;
 
-using BepInEx.Logging;
-
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
-using Raider.Plugin;
+using Raider.Plugin.Game;
+using static Raider.Plugin.Game.Il2CppReflection;
 
 /// <summary>
-/// Handles the Claim Playtime Rewards chore execution.
-/// Collects every playtime gift whose timer has finished (without waiting for the rest).
+/// Claim playtime rewards: collects every playtime gift whose timer has finished, without waiting for the rest.
+/// <para>
+/// Game side. The game's own helper, <c>UserWrapper.HourlyGiftsWrapper</c>, throws KeyNotFoundException(0) live on
+/// its computed members, so the gift state is read from the data underneath it:
+/// <list type="bullet">
+/// <item>Progress: <c>UserWrapper.User.GameData.SessionChestData</c> (SharedModel.Meta.SessionChests.UserSessionChestData):
+/// <c>TotalMsInGameToday</c>, <c>PrizeReceivedMinutes</c>, <c>UserLevelForSessionChest</c>; the Plarium Play
+/// program's own row in <c>PlariumProgramChest</c> (when <c>HasPlariumProgramChest</c>).</item>
+/// <item>Prizes: <c>HourlyGiftsWrapper._staticData.SessionChestInfos</c>, one SessionChestInfo per account-level band
+/// (<c>MinUserLevel</c>..<c>MaxUserLevel</c>) with <c>UserPrizeByMinutes</c> and <c>PlariumProgramPrizesByMinutes</c>.</item>
+/// </list>
+/// A gift is ready when its minute threshold is at most the server-counted play time and it is not in the received
+/// list. The server count lags the running session, so this never claims early; the game re-checks every claim.
+/// <c>TakeSessionChestCmd(minutes)</c> / <c>TakePlariumProgramSessionChestCmd(minutes)</c> take one gift.
+/// </para>
 /// </summary>
 internal sealed class ClaimPlaytimeRewardsChoreHandler : IChoreHandler
 {
-    private readonly ManualLogSource _log;
+    private const string TakeRegular = "Client.Model.Gameplay.SessionChests.Commands.TakeSessionChestCmd";
+    private const string TakePlarium = "Client.Model.Gameplay.SessionChests.Commands.TakePlariumProgramSessionChestCmd";
 
-    public ClaimPlaytimeRewardsChoreHandler()
+    public Task<ChoreHandlerResult> ExecuteAsync(Dictionary<string, object>? parameters) =>
+        ChoreRun.ExecuteAsync("Claim playtime rewards", parameters, Plan);
+
+    private static ChorePlan Plan(object userWrapper)
     {
-        _log = RaiderPlugin.Log;
+        var progress = GetRequired(GetRequired(GetRequired(userWrapper, "User"), "GameData"), "SessionChestData");
+        var infos = Items(Get(GetRequired(GetRequired(userWrapper, "HourlyGiftsWrapper"), "_staticData"), "SessionChestInfos")).ToList();
+        if (infos.Count == 0)
+        {
+            throw new GameStateException("the game has no playtime gift tables (StaticSessionChestData.SessionChestInfos is empty)");
+        }
+
+        var sessionChestLevel = Convert.ToInt32(Get(progress, "UserLevelForSessionChest"));
+        var accountLevel = Convert.ToInt32(Get(GetRequired(userWrapper, "Account"), "Level"));
+        // The level the server fixed for today's gifts; 0 before it has set one, then the account level decides
+        var level = sessionChestLevel > 0 ? sessionChestLevel : accountLevel;
+        var band = infos.FirstOrDefault(info =>
+                Convert.ToInt32(Get(info, "MinUserLevel")) <= level && level <= Convert.ToInt32(Get(info, "MaxUserLevel")))
+            ?? throw new GameStateException($"no playtime gift table covers level {level}");
+
+        var commands = new List<PlannedCommand>();
+        var details = new Dictionary<string, object?>
+        {
+            ["level"] = new { sessionChestLevel, accountLevel }
+        };
+
+        AddRow("Playtime", TakeRegular, progress, Get(band, "UserPrizeByMinutes"), commands, details);
+        if (Convert.ToBoolean(Get(progress, "HasPlariumProgramChest")) && Get(progress, "PlariumProgramChest") is { } plarium)
+        {
+            AddRow("PlariumPlay", TakePlarium, plarium, Get(band, "PlariumProgramPrizesByMinutes"), commands, details);
+        }
+
+        return commands.Count == 0 ? ChorePlan.Nothing("NoFinishedGifts", details) : new ChorePlan(commands, "", details);
     }
 
-    public async Task<ChoreHandlerResult> ExecuteAsync(Dictionary<string, object>? parameters)
+    /// <summary>Plans one row of gifts; <paramref name="row"/> has TotalMsInGameToday and PrizeReceivedMinutes.</summary>
+    private static void AddRow(
+        string name, string command, object row, object? prizesByMinutes,
+        List<PlannedCommand> commands, Dictionary<string, object?> details)
     {
-        try
-        {
-            _log.LogInfo("Starting Claim Playtime Rewards chore");
+        var playtime = (int)(Convert.ToInt64(Get(row, "TotalMsInGameToday")) / 60_000);
+        var received = Items(Get(row, "PrizeReceivedMinutes")).Select(Convert.ToInt32).ToHashSet();
+        var thresholds = Items(prizesByMinutes).Select(entry => Convert.ToInt32(Get(entry, "Key"))).OrderBy(m => m).ToList();
+        var ready = thresholds.Where(minutes => minutes <= playtime && !received.Contains(minutes)).ToList();
 
-            // Step 1: Get all playtime rewards
-            var playtimeRewards = await GetPlaytimeRewardsAsync();
-            if (playtimeRewards == null || playtimeRewards.Count == 0)
-            {
-                _log.LogInfo("Claim Playtime Rewards: No playtime rewards available - nothing to do");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "NothingToDo", reason = "NoPlaytimeRewards" });
-            }
-
-            _log.LogInfo($"Claim Playtime Rewards: Found {playtimeRewards.Count} playtime reward(s)");
-
-            // Step 2: Filter for rewards whose timer has finished (ready to claim)
-            var readyRewards = playtimeRewards.Where(reward => reward.IsReadyToClaim).ToList();
-            if (readyRewards.Count == 0)
-            {
-                _log.LogInfo("Claim Playtime Rewards: No finished playtime gifts - nothing to do");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "NothingToDo", reason = "NoFinishedGifts" });
-            }
-
-            _log.LogInfo($"Claim Playtime Rewards: Found {readyRewards.Count} finished gift(s) to claim");
-
-            // Step 3: Claim each ready reward
-            var claimedRewards = new List<object>();
-            foreach (var reward in readyRewards)
-            {
-                var claimResult = await ClaimRewardAsync(reward);
-                if (claimResult.Success)
-                {
-                    claimedRewards.Add(new
-                    {
-                        rewardId = reward.RewardId,
-                        rewardType = reward.RewardType,
-                        rewards = claimResult.Rewards
-                    });
-                    _log.LogInfo($"Claim Playtime Rewards: Claimed {reward.RewardType} (ID: {reward.RewardId})");
-                }
-                else
-                {
-                    _log.LogWarning($"Claim Playtime Rewards: Failed to claim {reward.RewardType} (ID: {reward.RewardId}): {claimResult.ErrorMessage}");
-                }
-                
-                await Task.Yield(); // Allow Unity main thread to process between claims
-            }
-
-            if (claimedRewards.Count == 0)
-            {
-                _log.LogWarning("Claim Playtime Rewards: Attempted to claim rewards but none succeeded");
-                return new ChoreHandlerResult(
-                    true,
-                    null,
-                    new { outcome = "NothingToDo", reason = "CollectionFailed" });
-            }
-
-            _log.LogInfo($"Claim Playtime Rewards: Successfully claimed {claimedRewards.Count} reward(s)");
-            return new ChoreHandlerResult(
-                true,
-                null,
-                new { outcome = "Success", claimed = claimedRewards, remaining = playtimeRewards.Count - claimedRewards.Count });
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Claim Playtime Rewards chore failed with exception: {ex}");
-            return new ChoreHandlerResult(false, $"Exception: {ex.Message}");
-        }
+        details[name] = new { playtimeTodayMinutes = playtime, thresholds, received, ready };
+        commands.AddRange(ready.Select(minutes =>
+            new PlannedCommand(command, new object?[] { minutes }, new { gift = name, minutes })));
     }
-
-    /// <summary>
-    /// Gets all playtime rewards from the game.
-    /// </summary>
-    private async Task<List<PlaytimeReward>?> GetPlaytimeRewardsAsync()
-    {
-        await Task.Yield(); // Allow Unity main thread to process
-
-        try
-        {
-            // In the real implementation, this would access the game's playtime reward system via reflection
-            // Example:
-            // var playtimeController = PlaytimeRewardController.Instance;
-            // if (playtimeController == null) return null;
-            // return playtimeController.GetAllRewards().Select(ConvertToPlaytimeReward).ToList();
-
-            // For now, return placeholder data - this needs actual game API integration
-            _log.LogWarning("GetPlaytimeRewardsAsync: Using placeholder - needs actual game API integration");
-
-            // Simulate finding some playtime rewards for testing
-            // In reality, this would query the game's actual playtime reward system
-            return new List<PlaytimeReward>();
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Error getting playtime rewards: {ex.Message}");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Claims a specific playtime reward.
-    /// </summary>
-    private async Task<ClaimRewardResult> ClaimRewardAsync(PlaytimeReward reward)
-    {
-        await Task.Yield();
-
-        try
-        {
-            // In the real implementation, this would call the game's claim method
-            // Example:
-            // var playtimeController = PlaytimeRewardController.Instance;
-            // var result = await playtimeController.ClaimRewardAsync(reward.RewardId);
-            // return new ClaimRewardResult(result.Success, result.Rewards, result.ErrorMessage);
-
-            // Placeholder - needs actual game API integration
-            _log.LogWarning($"ClaimRewardAsync: Using placeholder for reward {reward.RewardId} - needs actual game API integration");
-            return new ClaimRewardResult(false, null, "Not implemented - needs game API integration");
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Error claiming playtime reward {reward.RewardId}: {ex.Message}");
-            return new ClaimRewardResult(false, null, ex.Message);
-        }
-    }
-
-    /// <summary>
-    /// Represents a playtime reward.
-    /// </summary>
-    private sealed class PlaytimeReward
-    {
-        public string RewardId { get; init; } = string.Empty;
-        public string RewardType { get; init; } = string.Empty; // e.g., "Energy", "Silver", "Shard", "XP"
-        public bool IsReadyToClaim { get; init; } // True if timer has finished
-        public TimeSpan TimeRemaining { get; init; } // Time until ready (0 if ready)
-        public object? RawData { get; init; }
-    }
-
-    /// <summary>
-    /// Result of claiming a playtime reward.
-    /// </summary>
-    private sealed record ClaimRewardResult(
-        bool Success,
-        object? Rewards = null,
-        string? ErrorMessage = null);
 }
