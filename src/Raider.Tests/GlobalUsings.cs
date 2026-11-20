@@ -7,4 +7,4 @@ global using Raider.Tests.TestHelpers;
 global using Xunit;
 global using FluentAssertions;
 global using Moq;
-global using System.Text.Json;
+global using System.Text.Json;global using Microsoft.Extensions.Logging;

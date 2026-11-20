@@ -77,7 +77,7 @@ public sealed class PluginInstallerServiceTests
     }
 
     [Fact]
-    public void GenerateToken_ProducesValidBase64UrlString()
+    public async Task GenerateToken_ProducesValidBase64UrlString()
     {
         // Test the private GenerateToken method via reflection or just verify token format
         var installation = new GameInstallation(

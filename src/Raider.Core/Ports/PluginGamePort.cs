@@ -43,7 +43,7 @@ public sealed class PluginGamePort : IGamePort
                 }
             }
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             // Log error but don't throw - return unknown
         }

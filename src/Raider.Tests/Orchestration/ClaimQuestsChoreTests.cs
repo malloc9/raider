@@ -108,12 +108,12 @@ public sealed class ClaimQuestsChoreTests
             outcome = "Success",
             claimed = new[]
             {
-                new { rewardId = "daily-1", questType = "Daily", tab = "Daily", rewards = new { energy = 30, silver = 5000 } },
-                new { rewardId = "weekly-1", questType = "Weekly", tab = "Weekly", rewards = new { ancientShard = 1 } },
-                new { rewardId = "monthly-1", questType = "Monthly", tab = "Monthly", rewards = new { voidShard = 1 } },
-                new { rewardId = "advanced-1", questType = "Advanced", tab = "Advanced", rewards = new { sacredShard = 1 } },
-                new { rewardId = "daily-progress", questType = "ProgressChest", tab = "Daily", rewards = new { energy = 100, silver = 25000 } },
-                new { rewardId = "weekly-progress", questType = "ProgressChest", tab = "Weekly", rewards = new { ancientShard = 2, voidShard = 1 } }
+                new { rewardId = "daily-1", questType = "Daily", tab = "Daily", rewards = (object)new { energy = 30, silver = 5000 } },
+                new { rewardId = "weekly-1", questType = "Weekly", tab = "Weekly", rewards = (object)new { ancientShard = 1 } },
+                new { rewardId = "monthly-1", questType = "Monthly", tab = "Monthly", rewards = (object)new { voidShard = 1 } },
+                new { rewardId = "advanced-1", questType = "Advanced", tab = "Advanced", rewards = (object)new { sacredShard = 1 } },
+                new { rewardId = "daily-progress", questType = "ProgressChest", tab = "Daily", rewards = (object)new { energy = 100, silver = 25000 } },
+                new { rewardId = "weekly-progress", questType = "ProgressChest", tab = "Weekly", rewards = (object)new { ancientShard = 2, voidShard = 1 } }
             },
             remaining = 3
         };
@@ -181,7 +181,7 @@ public sealed class ClaimQuestsChoreTests
             outcome = "Success",
             claimed = new[]
             {
-                new { rewardId = "daily-1", questType = "Daily", tab = "Daily", rewards = new { energy = 30 } }
+                new { rewardId = "daily-1", questType = "Daily", tab = "Daily", rewards = (object)new { energy = 30 } }
             },
             remaining = 2
         };
