@@ -54,6 +54,12 @@ public sealed class PlariumPlayAccountSwitcher : IAccountSwitcher
 
         try
         {
+            // Chromium builds its accessibility tree only once an automation client asks for it
+            if (!WaitForPageTree(window, cancellationToken))
+            {
+                return AccountSwitchResult.Failed("Plarium Play's window shows no controls to Raider");
+            }
+
             // 1. Open the account menu and its "Switch account" list, unless the login is already listed
             var loginEntry = FindByName(window, plariumLogin);
             if (loginEntry == null)
@@ -134,6 +140,24 @@ public sealed class PlariumPlayAccountSwitcher : IAccountSwitcher
         }
 
         return null;
+    }
+
+    private static bool WaitForPageTree(AutomationElement window, CancellationToken cancellationToken)
+    {
+        var anyButton = new PropertyCondition(AutomationElement.ControlTypeProperty, ControlType.Button);
+        var deadline = DateTime.UtcNow + StepTimeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (window.FindFirst(TreeScope.Descendants, anyButton) != null)
+            {
+                return true;
+            }
+
+            Thread.Sleep(500);
+        }
+
+        return false;
     }
 
     private static bool WaitForPasswordPrompt(AutomationElement root, CancellationToken cancellationToken)
