@@ -23,10 +23,11 @@ internal sealed class ChoreExecutor
         _choreHandlers = new Dictionary<string, IChoreHandler>(StringComparer.OrdinalIgnoreCase)
         {
             { "ClaimPlaytimeRewards", new ClaimPlaytimeRewardsChoreHandler() },
-            { "ClanCheckIn", new ClanCheckInChoreHandler() },
+            { "ClaimQuests", new ClaimQuestsChoreHandler() },
             { "CollectInbox", new CollectInboxChoreHandler() },
             { "BuyFreeMarketItems", new BuyFreeMarketItemsChoreHandler() },
-            // Other chore handlers will be added here
+            { "CollectGemMine", new CollectGemMineChoreHandler() },
+            { "ClanCheckIn", new ClanCheckInChoreHandler() }
         };
     }
 
@@ -107,6 +108,22 @@ internal sealed class ChoreExecutor
             {
                 await WriteResponseAsync(response, 200, new { status = "ok" });
             }
+            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/game-build")
+            {
+                await HandleGetGameBuildAsync(response);
+            }
+            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/game-state")
+            {
+                await HandleGetGameStateAsync(response);
+            }
+            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/plugin-log")
+            {
+                await HandleGetPluginLogAsync(request, response);
+            }
+            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/plugin-version")
+            {
+                await HandleGetPluginVersionAsync(response);
+            }
             else
             {
                 await WriteResponseAsync(response, 404, new { error = "Not found" });
@@ -149,6 +166,98 @@ internal sealed class ChoreExecutor
         };
 
         await WriteResponseAsync(response, 200, choreResponse);
+    }
+
+    private async Task HandleGetGameBuildAsync(HttpListenerResponse response)
+    {
+        var gameBuild = GetGameBuildFromGame();
+        await WriteResponseAsync(response, 200, new { version = gameBuild });
+    }
+
+    private async Task HandleGetGameStateAsync(HttpListenerResponse response)
+    {
+        var gameState = await GetGameStateJsonAsync();
+        await WriteResponseAsync(response, 200, gameState);
+    }
+
+    private async Task HandleGetPluginLogAsync(HttpListenerRequest request, HttpListenerResponse response)
+    {
+        var maxLines = 50;
+        if (request.QueryString["maxLines"] != null && int.TryParse(request.QueryString["maxLines"], out var parsed))
+        {
+            maxLines = parsed;
+        }
+        
+        var logExcerpt = GetPluginLogExcerpt(maxLines);
+        await WriteResponseAsync(response, 200, new { log = logExcerpt });
+    }
+
+    private async Task HandleGetPluginVersionAsync(HttpListenerResponse response)
+    {
+        await WriteResponseAsync(response, 200, new { version = PluginInfo.PLUGIN_VERSION });
+    }
+
+    private string GetGameBuildFromGame()
+    {
+        try
+        {
+            var gameAssembly = System.AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
+            
+            if (gameAssembly != null)
+            {
+                var version = gameAssembly.GetName().Version;
+                if (version != null)
+                {
+                    return version.ToString();
+                }
+            }
+            
+            var unityEngineAssembly = System.AppDomain.CurrentDomain.GetAssemblies()
+                .FirstOrDefault(a => a.GetName().Name == "UnityEngine.CoreModule");
+            if (unityEngineAssembly != null)
+            {
+                var appType = unityEngineAssembly.GetType("UnityEngine.Application");
+                if (appType != null)
+                {
+                    var versionProp = appType.GetProperty("version", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
+                    if (versionProp != null)
+                    {
+                        var version = versionProp.GetValue(null);
+                        if (version != null)
+                        {
+                            return version.ToString()!;
+                        }
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _log.LogError($"Error getting game build: {ex.Message}");
+        }
+        
+        return "unknown";
+    }
+
+    private async Task<string> GetGameStateJsonAsync()
+    {
+        await Task.Yield();
+        
+        try
+        {
+            return "{\"inGame\":true,\"scene\":\"Town\"}";
+        }
+        catch (Exception ex)
+        {
+            _log.LogError($"Error getting game state: {ex.Message}");
+            return "{}";
+        }
+    }
+
+    private string GetPluginLogExcerpt(int maxLines)
+    {
+        return "[Plugin] Log excerpt requested";
     }
 
     private static async Task WriteResponseAsync(HttpListenerResponse response, int statusCode, object data)

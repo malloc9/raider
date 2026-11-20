@@ -2,7 +2,7 @@ namespace Raider.Plugin;
 
 using BepInEx;
 using BepInEx.Logging;
-using System.Reflection;
+using Raider.Plugin.Game;
 
 /// <summary>
 /// Main Raider plugin entry point for BepInEx.
@@ -18,6 +18,9 @@ public sealed class RaiderPlugin : BaseUnityPlugin
     {
         Log = Logger;
         Instance = this;
+        
+        // Initialize game access for reflection-based game API calls
+        GameAccess.Initialize(Log);
         
         // Initialize chore executor
         ChoreExecutor = new ChoreExecutor();
