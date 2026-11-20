@@ -70,7 +70,7 @@ public sealed class RunOrchestrator
 
             if (executionResult.Success)
             {
-                choreResult = ChoreResult.Success(chore, choreStartedAt, choreCompletedAt);
+                choreResult = ChoreResult.Success(chore, choreStartedAt, choreCompletedAt, executionResult.Data);
                 _logger.LogInformation("Chore {ChoreId} succeeded", chore.Id);
             }
             else
@@ -89,6 +89,7 @@ public sealed class RunOrchestrator
                     chore,
                     outcome,
                     executionResult.ErrorMessage,
+                    null,
                     null,
                     choreStartedAt,
                     choreCompletedAt);
