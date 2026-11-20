@@ -1,14 +1,12 @@
+namespace Raider.Plugin.Chores;
+
 using BepInEx.Logging;
 using HarmonyLib;
 using Raider.Plugin.Game;
-using Raider.Plugin.Ipc;
-using System;
-using System.Reflection;
-
-namespace Raider.Plugin.Chores;
 
 /// <summary>
-/// Handles the Collect Gem Mine chore.
+/// Handles the Collect Gem Mine chore via Harmony patches.
+/// This is the legacy patch-based approach; the new HTTP-based handler is CollectGemMineChoreHandler.
 /// </summary>
 public static class GemMineChore
 {
@@ -20,45 +18,15 @@ public static class GemMineChore
         _logger = logger;
         _harmony = harmony;
 
-        // Register the chore handler with the IPC server
-        IpcServer.RegisterChoreHandler("CollectGemMine", HandleCollectGemMine);
+        // Harmony patches for Gem Mine would go here
+        // For now, the HTTP-based CollectGemMineChoreHandler handles this chore
         
-        _logger.LogInfo("GemMineChore initialized");
-    }
-
-    private static ChoreResult HandleCollectGemMine()
-    {
-        _logger?.LogInfo("Handling CollectGemMine chore");
-
-        if (!GameAccess.IsInitialized)
-        {
-            _logger?.LogError("GameAccess not initialized");
-            return new ChoreResult(false, "GameAccess not initialized");
-        }
-
-        try
-        {
-            var collected = GameAccess.CollectGemMine();
-            
-            if (collected >= 0)
-            {
-                return new ChoreResult(true, null, collected);
-            }
-            else
-            {
-                return new ChoreResult(false, "Failed to collect Gem Mine");
-            }
-        }
-        catch (Exception ex)
-        {
-            _logger?.LogError($"Exception in CollectGemMine: {ex}");
-            return new ChoreResult(false, $"Exception: {ex.Message}");
-        }
+        _logger.LogInfo("GemMineChore initialized (legacy Harmony patches - HTTP handler is primary)");
     }
 }
 
 /// <summary>
-/// Result of a chore execution in the plugin.
+/// Result of a chore execution in the plugin (legacy).
 /// </summary>
 public readonly record struct ChoreResult(
     bool Success,
