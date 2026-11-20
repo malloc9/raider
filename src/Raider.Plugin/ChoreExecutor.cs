@@ -5,6 +5,7 @@ using System.Text;
 using System.Text.Json;
 using BepInEx.Logging;
 using Raider.Plugin.Chores;
+using Raider.Plugin.Game;
 
 /// <summary>
 /// Executes chores and handles IPC communication with the desktop app.
@@ -40,7 +41,7 @@ internal sealed class ChoreExecutor
             return;
 
         _httpListener = new HttpListener();
-        _httpListener.Prefixes.Add("http://localhost:51837/raider/");
+        _httpListener.Prefixes.Add("http://localhost:51838/raider/");
         
         try
         {
@@ -48,7 +49,7 @@ internal sealed class ChoreExecutor
             _isRunning = true;
             _listenerThread = new Thread(ListenLoop) { IsBackground = true };
             _listenerThread.Start();
-            _log.LogInfo("IPC server started on http://localhost:51837/raider/");
+            _log.LogInfo("IPC server started on http://localhost:51838/raider/");
         }
         catch (Exception ex)
         {
@@ -83,7 +84,6 @@ internal sealed class ChoreExecutor
             }
             catch (HttpListenerException) when (!_isRunning)
             {
-                // Expected when stopping
                 break;
             }
             catch (Exception ex)
@@ -100,33 +100,32 @@ internal sealed class ChoreExecutor
 
         try
         {
-            if (request.HttpMethod == "POST" && request.Url?.AbsolutePath == "/raider/execute-chore")
+            switch (request.HttpMethod)
             {
-                await HandleExecuteChoreAsync(request, response);
-            }
-            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/health")
-            {
-                await WriteResponseAsync(response, 200, new { status = "ok" });
-            }
-            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/game-build")
-            {
-                await HandleGetGameBuildAsync(response);
-            }
-            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/game-state")
-            {
-                await HandleGetGameStateAsync(response);
-            }
-            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/plugin-log")
-            {
-                await HandleGetPluginLogAsync(request, response);
-            }
-            else if (request.HttpMethod == "GET" && request.Url?.AbsolutePath == "/raider/plugin-version")
-            {
-                await HandleGetPluginVersionAsync(response);
-            }
-            else
-            {
-                await WriteResponseAsync(response, 404, new { error = "Not found" });
+                case "GET" when request.Url?.AbsolutePath == "/raider/health":
+                    await WriteResponseAsync(response, 200, new { status = "ok" });
+                    break;
+                case "GET" when request.Url?.AbsolutePath == "/raider/game-build":
+                    await HandleGetGameBuildAsync(response);
+                    break;
+                case "GET" when request.Url?.AbsolutePath == "/raider/game-state":
+                    await HandleGetGameStateAsync(response);
+                    break;
+                case "GET" when request.Url?.AbsolutePath?.StartsWith("/raider/plugin-log") == true:
+                    await HandleGetPluginLogAsync(request, response);
+                    break;
+                case "GET" when request.Url?.AbsolutePath == "/raider/plugin-version":
+                    await HandleGetPluginVersionAsync(response);
+                    break;
+                case "POST" when request.Url?.AbsolutePath == "/raider/execute-chore":
+                    await HandleExecuteChoreAsync(request, response);
+                    break;
+                case "POST" when request.Url?.AbsolutePath == "/raider/switch-account":
+                    await HandleSwitchAccountAsync(request, response);
+                    break;
+                default:
+                    await WriteResponseAsync(response, 404, new { error = "Not found" });
+                    break;
             }
         }
         catch (Exception ex)
@@ -134,6 +133,42 @@ internal sealed class ChoreExecutor
             _log.LogError($"Error handling request: {ex.Message}");
             await WriteResponseAsync(response, 500, new { error = ex.Message });
         }
+    }
+
+    private async Task HandleGetGameBuildAsync(HttpListenerResponse response)
+    {
+        // Key is "version" to match PluginGamePort.GameBuildResponse
+        await WriteResponseAsync(response, 200, new { version = GameAccess.GetGameBuild() });
+    }
+
+    private async Task HandleGetGameStateAsync(HttpListenerResponse response)
+    {
+        // PluginGamePort reads the response body as the raw game-state JSON
+        var state = new
+        {
+            isInGame = GameAccess.IsInGame(),
+            gameBuild = GameAccess.GetGameBuild(),
+            timestamp = DateTimeOffset.UtcNow.ToString("O")
+        };
+        await WriteResponseAsync(response, 200, state);
+    }
+
+    private async Task HandleGetPluginVersionAsync(HttpListenerResponse response)
+    {
+        await WriteResponseAsync(response, 200, new { version = PluginInfo.PLUGIN_VERSION });
+    }
+
+    private async Task HandleGetPluginLogAsync(HttpListenerRequest request, HttpListenerResponse response)
+    {
+        var maxLines = 50;
+        if (request.QueryString["maxLines"] is string maxLinesStr && int.TryParse(maxLinesStr, out var parsed))
+        {
+            maxLines = parsed;
+        }
+
+        // Return recent log entries (simplified for now)
+        var log = $"[Plugin] Log excerpt requested ({maxLines} lines)\n[Plugin] Plugin version: {PluginInfo.PLUGIN_VERSION}\n[Plugin] Game build: {GameAccess.GetGameBuild()}\n[Plugin] In-game: {GameAccess.IsInGame()}";
+        await WriteResponseAsync(response, 200, new { log });
     }
 
     private async Task HandleExecuteChoreAsync(HttpListenerRequest request, HttpListenerResponse response)
@@ -158,106 +193,33 @@ internal sealed class ChoreExecutor
 
         var result = await handler.ExecuteAsync(choreRequest.Parameters);
         
-        var choreResponse = new ChoreExecutionResponse
+        var choreResponse = new ExecuteChoreResponse
         {
             Success = result.Success,
             ErrorMessage = result.ErrorMessage,
+            GemsCollected = result.Data is int gems ? gems : 0,
             Data = result.Data
         };
 
         await WriteResponseAsync(response, 200, choreResponse);
     }
 
-    private async Task HandleGetGameBuildAsync(HttpListenerResponse response)
+    private async Task HandleSwitchAccountAsync(HttpListenerRequest request, HttpListenerResponse response)
     {
-        var gameBuild = GetGameBuildFromGame();
-        await WriteResponseAsync(response, 200, new { version = gameBuild });
-    }
+        using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
+        var requestJson = await reader.ReadToEndAsync();
 
-    private async Task HandleGetGameStateAsync(HttpListenerResponse response)
-    {
-        var gameState = await GetGameStateJsonAsync();
-        await WriteResponseAsync(response, 200, gameState);
-    }
-
-    private async Task HandleGetPluginLogAsync(HttpListenerRequest request, HttpListenerResponse response)
-    {
-        var maxLines = 50;
-        if (request.QueryString["maxLines"] != null && int.TryParse(request.QueryString["maxLines"], out var parsed))
+        var switchRequest = JsonSerializer.Deserialize<SwitchAccountRequest>(requestJson, JsonOptions.Default);
+        if (switchRequest == null || string.IsNullOrEmpty(switchRequest.PlariumLogin))
         {
-            maxLines = parsed;
+            await WriteResponseAsync(response, 400, new { error = "Invalid request" });
+            return;
         }
-        
-        var logExcerpt = GetPluginLogExcerpt(maxLines);
-        await WriteResponseAsync(response, 200, new { log = logExcerpt });
-    }
 
-    private async Task HandleGetPluginVersionAsync(HttpListenerResponse response)
-    {
-        await WriteResponseAsync(response, 200, new { version = PluginInfo.PLUGIN_VERSION });
-    }
-
-    private string GetGameBuildFromGame()
-    {
-        try
-        {
-            var gameAssembly = System.AppDomain.CurrentDomain.GetAssemblies()
-                .FirstOrDefault(a => a.GetName().Name == "Assembly-CSharp");
-            
-            if (gameAssembly != null)
-            {
-                var version = gameAssembly.GetName().Version;
-                if (version != null)
-                {
-                    return version.ToString();
-                }
-            }
-            
-            var unityEngineAssembly = System.AppDomain.CurrentDomain.GetAssemblies()
-                .FirstOrDefault(a => a.GetName().Name == "UnityEngine.CoreModule");
-            if (unityEngineAssembly != null)
-            {
-                var appType = unityEngineAssembly.GetType("UnityEngine.Application");
-                if (appType != null)
-                {
-                    var versionProp = appType.GetProperty("version", System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static);
-                    if (versionProp != null)
-                    {
-                        var version = versionProp.GetValue(null);
-                        if (version != null)
-                        {
-                            return version.ToString()!;
-                        }
-                    }
-                }
-            }
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Error getting game build: {ex.Message}");
-        }
-        
-        return "unknown";
-    }
-
-    private async Task<string> GetGameStateJsonAsync()
-    {
-        await Task.Yield();
-        
-        try
-        {
-            return "{\"inGame\":true,\"scene\":\"Town\"}";
-        }
-        catch (Exception ex)
-        {
-            _log.LogError($"Error getting game state: {ex.Message}");
-            return "{}";
-        }
-    }
-
-    private string GetPluginLogExcerpt(int maxLines)
-    {
-        return "[Plugin] Log excerpt requested";
+        _log.LogInfo($"Switch account requested: {switchRequest.PlariumLogin}");
+        // Account switching is handled by the desktop app via Plarium Play automation
+        // The plugin just acknowledges the request
+        await WriteResponseAsync(response, 200, new { success = true, message = "Account switch acknowledged" });
     }
 
     private static async Task WriteResponseAsync(HttpListenerResponse response, int statusCode, object data)
@@ -301,11 +263,20 @@ internal sealed class ChoreExecutionRequest
 /// <summary>
 /// Response from chore execution via IPC.
 /// </summary>
-internal sealed class ChoreExecutionResponse
+internal sealed class ExecuteChoreResponse
 {
     public bool Success { get; set; }
     public string? ErrorMessage { get; set; }
+    public int GemsCollected { get; set; }
     public object? Data { get; set; }
+}
+
+/// <summary>
+/// Request to switch account.
+/// </summary>
+internal sealed class SwitchAccountRequest
+{
+    public string PlariumLogin { get; set; } = string.Empty;
 }
 
 /// <summary>

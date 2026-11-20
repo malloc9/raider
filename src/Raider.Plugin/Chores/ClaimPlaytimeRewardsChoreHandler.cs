@@ -1,5 +1,9 @@
 namespace Raider.Plugin.Chores;
 
+using BepInEx.Logging;
+
+/// <summary>
+/// Handles the Claim Playtime Rewards chore execution.
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
@@ -25,6 +29,20 @@ internal sealed class ClaimPlaytimeRewardsChoreHandler : IChoreHandler
         {
             _log.LogInfo("Starting Claim Playtime Rewards chore");
 
+            // TODO: Implement actual playtime rewards claiming via game API
+            // This would involve:
+            // 1. Finding the playtime rewards UI/controller
+            // 2. Checking which rewards are available
+            // 3. Claiming each available reward
+            
+            await Task.Yield(); // Allow Unity main thread to process
+            
+            _log.LogWarning("Claim Playtime Rewards: Not yet implemented - placeholder");
+            
+            return new ChoreHandlerResult(
+                false,
+                "Not yet implemented - requires game API integration",
+                new { outcome = "NotImplemented" });
             // Step 1: Get all playtime rewards
             var playtimeRewards = await GetPlaytimeRewardsAsync();
             if (playtimeRewards == null || playtimeRewards.Count == 0)

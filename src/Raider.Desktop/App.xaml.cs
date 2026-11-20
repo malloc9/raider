@@ -1,0 +1,69 @@
+namespace Raider.Desktop;
+
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
+using Microsoft.Extensions.Logging;
+using Raider.Core.Services;
+using Raider.Core.Ports;
+using Raider.Desktop.Services;
+using Raider.Desktop.ViewModels;
+using Raider.Desktop.Views;
+using System.Windows;
+
+/// <summary>
+/// Interaction logic for App.xaml
+/// </summary>
+public partial class App : Application
+{
+    private IHost? _host;
+
+    public App()
+    {
+        _host = Host.CreateDefaultBuilder()
+            .ConfigureServices((context, services) =>
+            {
+                // Core services
+                services.AddSingleton<IGameDetectionService, GameDetectionService>();
+                services.AddSingleton<IPluginInstallerService, PluginInstallerService>();
+                services.AddSingleton<IPluginHealthClient, PluginHealthClient>();
+                services.AddSingleton<IGamePort>(_ => new PluginGamePort());
+                services.AddSingleton<INotificationService, WindowsNotificationService>();
+                
+                // ViewModels
+                services.AddSingleton<MainWindowViewModel>();
+                
+                // Views
+                services.AddSingleton<MainWindow>();
+                
+                // Logging
+                services.AddLogging(builder =>
+                {
+                    builder.AddConsole();
+                    builder.SetMinimumLevel(LogLevel.Debug);
+                });
+            })
+            .Build();
+    }
+
+    protected override async void OnStartup(StartupEventArgs e)
+    {
+        await _host!.StartAsync();
+        
+        var mainWindow = _host.Services.GetRequiredService<MainWindow>();
+        mainWindow.Show();
+        
+        base.OnStartup(e);
+    }
+
+    protected override async void OnExit(ExitEventArgs e)
+    {
+        await _host!.StopAsync();
+        _host.Dispose();
+        base.OnExit(e);
+    }
+
+    public static T GetService<T>() where T : notnull
+    {
+        return Current._host!.Services.GetRequiredService<T>();
+    }
+}

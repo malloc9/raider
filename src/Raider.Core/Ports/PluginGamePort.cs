@@ -14,7 +14,7 @@ public sealed class PluginGamePort : IGamePort
     private readonly string _pluginBaseUrl;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public PluginGamePort(string pluginBaseUrl = "http://localhost:51837/raider/")
+    public PluginGamePort(string pluginBaseUrl = "http://localhost:51838/raider/")
     {
         _pluginBaseUrl = pluginBaseUrl.TrimEnd('/') + "/";
         _httpClient = new HttpClient
