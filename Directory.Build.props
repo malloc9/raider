@@ -1,7 +1,7 @@
 <Project>
   <!-- Auto-discover interop assemblies from local Plarium Play installation -->
   <PropertyGroup>
-    <PlariumPlayGamePath>$([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData))\Plarium\StandAloneApps\raid</PlariumPlayGamePath>
+    <PlariumPlayGamePath>$([System.Environment]::GetFolderPath(SpecialFolder.LocalApplicationData))\PlariumPlay\StandAloneApps\raid-shadow-legends\build</PlariumPlayGamePath>
     <InteropSourcePath>$(PlariumPlayGamePath)\Raid_Data\Managed</InteropSourcePath>
   </PropertyGroup>
 

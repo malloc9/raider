@@ -1,70 +1,142 @@
 namespace Raider.Tests.Integration;
 
-using Raider.Core.Models;
-using Raider.Core.Services;
-using Xunit;
-using FluentAssertions;
-using System.IO.Abstractions.TestingHelpers;
-using Microsoft.Win32;
-
 /// <summary>
-/// Integration tests for GameDetectionService with fake registry and file system.
+/// GameDetectionService against a fake %LOCALAPPDATA% laid out like Plarium Play 10.x.
 /// </summary>
-public sealed class GameDetectionIntegrationTests
+public sealed class GameDetectionIntegrationTests : IDisposable
 {
-    private readonly MockFileSystem _fileSystem;
+    private readonly string _localAppData = Path.Combine(Path.GetTempPath(), "raider-tests", Guid.NewGuid().ToString());
+    private readonly string _plariumPlay;
     private readonly GameDetectionService _service;
 
     public GameDetectionIntegrationTests()
     {
-        _fileSystem = new MockFileSystem();
-        _service = new GameDetectionService();
+        _plariumPlay = Path.Combine(_localAppData, "PlariumPlay");
+        Directory.CreateDirectory(_plariumPlay);
+        _service = new GameDetectionService(_localAppData);
+    }
+
+    public void Dispose()
+    {
+        if (Directory.Exists(_localAppData))
+            Directory.Delete(_localAppData, recursive: true);
     }
 
     [Fact]
-    public async Task FindGameInstallationAsync_FindsGameViaPlariumPlayRegistry_WhenRegistryExists()
+    public async Task FindsGame_ThroughGameStorageRecord()
     {
-        // This test would require mocking the registry
-        // For now, verify the service handles missing registry gracefully
+        var standAloneApps = Path.Combine(_plariumPlay, "StandAloneApps");
+        var build = CreateGame(Path.Combine(standAloneApps, "raid-shadow-legends", "build"));
+        WriteGameStorage(standAloneApps);
+
         var result = await _service.FindGameInstallationAsync();
-        // Result depends on actual system state
-        // In CI/test environment, this will likely be null
+
+        result.Should().NotBeNull();
+        result!.GamePath.Should().Be(build);
+        result.ExecutablePath.Should().Be(Path.Combine(build, "Raid.exe"));
+        result.DataPath.Should().Be(Path.Combine(build, "Raid_Data"));
+        result.IsPlariumPlay.Should().BeTrue();
     }
 
     [Fact]
-    public async Task ValidateGameInstallationAsync_ValidatesCompleteGameFolder()
+    public async Task FindsGame_InCustomInstallationPathFromRecord()
     {
-        var gamePath = @"C:\Games\Raid";
-        
-        _fileSystem.AddDirectory(Path.Combine(gamePath, "Raid_Data"));
-        _fileSystem.AddDirectory(Path.Combine(gamePath, "Raid_Data", "Managed"));
-        _fileSystem.AddFile(Path.Combine(gamePath, "Raid.exe"), new MockFileData("dummy exe"));
-        
-        // We can't easily test the real service with mock filesystem without abstraction
-        // This test documents the expected behavior
+        var customRoot = Path.Combine(_localAppData, "Games", "Plarium");
+        var build = CreateGame(Path.Combine(customRoot, "raid-shadow-legends", "build"));
+        WriteGameStorage(customRoot);
+
+        var result = await _service.FindGameInstallationAsync();
+
+        result!.GamePath.Should().Be(build);
     }
 
     [Fact]
-    public async Task ValidateGameInstallationAsync_RejectsIncompleteGameFolder()
+    public async Task FindsGame_InDefaultFolder_WhenRecordIsMissing()
     {
-        var gamePath = @"C:\Games\IncompleteRaid";
-        
-        _fileSystem.AddDirectory(gamePath);
-        _fileSystem.AddFile(Path.Combine(gamePath, "Raid.exe"), new MockFileData("dummy exe"));
-        // Missing Raid_Data folder
-        
-        // Would return false
+        var build = CreateGame(Path.Combine(_plariumPlay, "StandAloneApps", "raid-shadow-legends", "build"));
+
+        var result = await _service.FindGameInstallationAsync();
+
+        result!.GamePath.Should().Be(build);
     }
 
     [Fact]
-    public async Task ValidateGameInstallationAsync_AcceptsIL2CPPGameFolder()
+    public async Task FindsGame_InDefaultFolder_WhenRecordIsCorrupt()
     {
-        var gamePath = @"C:\Games\RaidIL2CPP";
-        
-        _fileSystem.AddDirectory(Path.Combine(gamePath, "Raid_Data"));
-        _fileSystem.AddDirectory(Path.Combine(gamePath, "Raid_Data", "il2cpp_data"));
-        _fileSystem.AddFile(Path.Combine(gamePath, "Raid.exe"), new MockFileData("dummy exe"));
-        
-        // Would return true (IL2CPP build)
+        var build = CreateGame(Path.Combine(_plariumPlay, "StandAloneApps", "raid-shadow-legends", "build"));
+        File.WriteAllText(Path.Combine(_plariumPlay, "gamestorage.gsfn"), "{not json");
+
+        var result = await _service.FindGameInstallationAsync();
+
+        result!.GamePath.Should().Be(build);
+    }
+
+    [Fact]
+    public async Task IgnoresRecordEntries_ThatDoNotListRaid()
+    {
+        var otherRoot = Path.Combine(_localAppData, "Other");
+        CreateGame(Path.Combine(otherRoot, "raid-shadow-legends", "build"));
+        File.WriteAllText(Path.Combine(_plariumPlay, "gamestorage.gsfn"),
+            "{\"InstalledGames\":{\"7\":{\"Id\":7,\"InstallationPath\":" + JsonSerializer.Serialize(otherRoot)
+            + ",\"InsalledGames\":{\"some-other-game\":\"1\"}}}}");
+
+        var result = await _service.FindGameInstallationAsync();
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ReportsNewestPlariumPlayVersionFolder()
+    {
+        CreateGame(Path.Combine(_plariumPlay, "StandAloneApps", "raid-shadow-legends", "build"));
+        Directory.CreateDirectory(Path.Combine(_plariumPlay, "10.17.0-0.0.1"));
+        Directory.CreateDirectory(Path.Combine(_plariumPlay, "10.18.0-0.0.0"));
+        Directory.CreateDirectory(Path.Combine(_plariumPlay, "Icons"));
+
+        var result = await _service.FindGameInstallationAsync();
+
+        result!.PlariumPlayVersion.Should().Be("10.18.0");
+    }
+
+    [Fact]
+    public async Task ReturnsNull_WhenGameIsNotInstalled()
+    {
+        var result = await _service.FindGameInstallationAsync();
+
+        result.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Validate_AcceptsIl2CppBuildFolder()
+    {
+        var build = CreateGame(Path.Combine(_localAppData, "game"));
+
+        (await _service.ValidateGameInstallationAsync(build)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Validate_RejectsFolderWithoutRaidData()
+    {
+        var folder = Path.Combine(_localAppData, "incomplete");
+        Directory.CreateDirectory(folder);
+        File.WriteAllText(Path.Combine(folder, "Raid.exe"), "");
+
+        (await _service.ValidateGameInstallationAsync(folder)).Should().BeFalse();
+    }
+
+    private static string CreateGame(string buildFolder)
+    {
+        Directory.CreateDirectory(Path.Combine(buildFolder, "Raid_Data", "il2cpp_data"));
+        File.WriteAllText(Path.Combine(buildFolder, "Raid.exe"), "");
+        return buildFolder;
+    }
+
+    private void WriteGameStorage(string installationPath)
+    {
+        // Same shape Plarium Play 10.18 writes, including its "InsalledGames" spelling
+        var json = "{\"InstalledGames\":{\"101\":{\"Id\":101,\"IntegrationType\":2,\"InstallationPath\":"
+            + JsonSerializer.Serialize(installationPath)
+            + ",\"InsalledGames\":{\"raid-shadow-legends\":\"157786\"},\"SourceUrls\":{}}},\"Installations\":[]}";
+        File.WriteAllText(Path.Combine(_plariumPlay, "gamestorage.gsfn"), json);
     }
 }
