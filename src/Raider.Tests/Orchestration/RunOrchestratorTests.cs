@@ -236,4 +236,40 @@ public sealed class RunOrchestratorTests
         run.BrokenByGameUpdateCount.Should().Be(0);
         run.Results.Should().HaveCount(2);
     }
+
+    [Fact]
+    public async Task CollectGemMine_WithGemsCollected_ReportsGemsInResult()
+    {
+        // Arrange
+        _gamePort.SetGameBuild(TestDataBuilder.CreateGameBuild("1.0.0"));
+        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(true, null, 150));
+
+        // Act
+        var run = await _orchestrator.ExecuteRunAsync(_account, _logDirectory);
+
+        // Assert
+        run.SuccessCount.Should().Be(2);
+        var gemMineResult = run.Results.First(r => r.Chore.Type == ChoreType.CollectGemMine);
+        gemMineResult.Outcome.Should().Be(ChoreOutcome.Success);
+        gemMineResult.GemsCollected.Should().Be(150);
+    }
+
+    [Fact]
+    public async Task CollectGemMine_WithNoGems_ReportsZeroGemsAndSuccess()
+    {
+        // Arrange
+        _gamePort.SetGameBuild(TestDataBuilder.CreateGameBuild("1.0.0"));
+        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(true, null, 0));
+
+        // Act
+        var run = await _orchestrator.ExecuteRunAsync(_account, _logDirectory);
+
+        // Assert
+        run.SuccessCount.Should().Be(2);
+        var gemMineResult = run.Results.First(r => r.Chore.Type == ChoreType.CollectGemMine);
+        gemMineResult.Outcome.Should().Be(ChoreOutcome.Success);
+        gemMineResult.GemsCollected.Should().Be(0);
+    }
 }
