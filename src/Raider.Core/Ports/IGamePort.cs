@@ -13,17 +13,6 @@ public interface IGamePort
     Task<GameBuild> GetGameBuildAsync(CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Gets the Plarium login the running game is logged into, or null when unknown.
-    /// </summary>
-    Task<string?> GetCurrentPlariumLoginAsync(CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Performs an Account switch to the specified Account, using logins Plarium Play already remembers.
-    /// Never asks for or handles a password: if one is needed, returns <see cref="AccountSwitchOutcome.PasswordRequired"/>.
-    /// </summary>
-    Task<AccountSwitchResult> SwitchAccountAsync(Account account, CancellationToken cancellationToken = default);
-    
-    /// <summary>
     /// Executes a chore.
     /// </summary>
     Task<ChoreExecutionResult> ExecuteChoreAsync(Chore chore, CancellationToken cancellationToken = default);

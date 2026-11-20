@@ -1,5 +1,7 @@
 # Findings: Plarium Play Account Switching
 
+> **Superseded** by ADR 0003 (`docs/adr/0003-drive-running-instances-instead-of-switching-accounts.md`): Raider drives already-running Instances instead of switching Accounts. Kept for history.
+
 **Status**: Spike complete  
 **Related Issue**: #2  
 **Parent Issue**: #1  

@@ -18,17 +18,8 @@ public sealed class FakeNotificationService : INotificationService
         return Task.CompletedTask;
     }
 
-    public List<Account> ManualLoginRequests { get; } = new();
-
-    public Task ShowManualLoginRequiredNotificationAsync(Account account, CancellationToken cancellationToken = default)
-    {
-        ManualLoginRequests.Add(account);
-        return Task.CompletedTask;
-    }
-
     public void Reset()
     {
-        ManualLoginRequests.Clear();
         LastNotifiedRun = null;
         NotificationCount = 0;
     }

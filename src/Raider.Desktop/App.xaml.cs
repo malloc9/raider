@@ -30,8 +30,7 @@ public partial class App : Application
                     sp.GetRequiredService<ILogger<PluginInstallerService>>(),
                     sp.GetRequiredService<IBepInExPackageProvider>()));
                 services.AddSingleton<IPluginHealthClient, PluginHealthClient>();
-                services.AddSingleton<IAccountSwitcher, PlariumPlayAccountSwitcher>();
-                services.AddSingleton<IGamePort>(sp => new PluginGamePort(sp.GetRequiredService<IAccountSwitcher>()));
+                services.AddSingleton<IGamePort>(_ => new PluginGamePort());
                 services.AddSingleton<INotificationService, WindowsNotificationService>();
                 services.AddSingleton<IAccountStore>(_ => new JsonAccountStore());
                 services.AddSingleton<ISnapshotService, SnapshotService>();

@@ -4,9 +4,8 @@
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>
       <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
-        <!-- Plarium Play runs elevated; Windows (UIPI) only lets an elevated app read and drive its window,
-             which the Account switch needs. -->
-        <requestedExecutionLevel level="requireAdministrator" uiAccess="false" />
+        <!-- Raider only talks to the plugin over localhost, so it needs no elevation. -->
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
       </requestedPrivileges>
     </security>
   </trustInfo>

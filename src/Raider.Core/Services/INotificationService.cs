@@ -13,9 +13,4 @@ public interface INotificationService
     /// <param name="run">The completed run.</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     Task ShowRunCompletionNotificationAsync(Run run, CancellationToken cancellationToken = default);
-
-    /// <summary>
-    /// Asks the player to log in to an Account by hand because its remembered login needs a password.
-    /// </summary>
-    Task ShowManualLoginRequiredNotificationAsync(Account account, CancellationToken cancellationToken = default);
 }

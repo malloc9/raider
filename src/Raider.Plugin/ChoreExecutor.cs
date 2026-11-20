@@ -120,9 +120,6 @@ internal sealed class ChoreExecutor
                 case "POST" when request.Url?.AbsolutePath == "/raider/execute-chore":
                     await HandleExecuteChoreAsync(request, response);
                     break;
-                case "POST" when request.Url?.AbsolutePath == "/raider/switch-account":
-                    await HandleSwitchAccountAsync(request, response);
-                    break;
                 default:
                     await WriteResponseAsync(response, 404, new { error = "Not found" });
                     break;
@@ -204,24 +201,6 @@ internal sealed class ChoreExecutor
         await WriteResponseAsync(response, 200, choreResponse);
     }
 
-    private async Task HandleSwitchAccountAsync(HttpListenerRequest request, HttpListenerResponse response)
-    {
-        using var reader = new StreamReader(request.InputStream, request.ContentEncoding ?? Encoding.UTF8);
-        var requestJson = await reader.ReadToEndAsync();
-
-        var switchRequest = JsonSerializer.Deserialize<SwitchAccountRequest>(requestJson, JsonOptions.Default);
-        if (switchRequest == null || string.IsNullOrEmpty(switchRequest.PlariumLogin))
-        {
-            await WriteResponseAsync(response, 400, new { error = "Invalid request" });
-            return;
-        }
-
-        _log.LogInfo($"Switch account requested: {switchRequest.PlariumLogin}");
-        // Account switching is handled by the desktop app via Plarium Play automation
-        // The plugin just acknowledges the request
-        await WriteResponseAsync(response, 200, new { success = true, message = "Account switch acknowledged" });
-    }
-
     private static async Task WriteResponseAsync(HttpListenerResponse response, int statusCode, object data)
     {
         response.StatusCode = statusCode;
@@ -269,14 +248,6 @@ internal sealed class ExecuteChoreResponse
     public string? ErrorMessage { get; set; }
     public int GemsCollected { get; set; }
     public object? Data { get; set; }
-}
-
-/// <summary>
-/// Request to switch account.
-/// </summary>
-internal sealed class SwitchAccountRequest
-{
-    public string PlariumLogin { get; set; } = string.Empty;
 }
 
 /// <summary>
