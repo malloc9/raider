@@ -1,22 +1,21 @@
 namespace Raider.Plugin;
 
-using System.Net;
-using System.Text;
-using System.Text.Json;
 using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
+using BepInEx.Unity.IL2CPP;
 using HarmonyLib;
 using Raider.Plugin.Game;
 using Raider.Plugin.Ipc;
 
 /// <summary>
-/// Main Raider plugin entry point for BepInEx 6.
+/// Main Raider plugin entry point for BepInEx 6 (IL2CPP).
 /// </summary>
 [BepInPlugin(PluginInfo.PLUGIN_GUID, PluginInfo.PLUGIN_NAME, PluginInfo.PLUGIN_VERSION)]
-public sealed class RaiderPlugin : BaseUnityPlugin
+public sealed class RaiderPlugin : BasePlugin
 {
-    internal static ManualLogSource Log { get; private set; } = null!;
+    /// <summary>Plugin-wide logger, set in <see cref="Load"/>.</summary>
+    internal static new ManualLogSource Log { get; private set; } = null!;
     internal static RaiderPlugin Instance { get; private set; } = null!;
     internal ChoreExecutor ChoreExecutor { get; private set; } = null!;
     internal HealthServer HealthServer { get; private set; } = null!;
@@ -25,37 +24,38 @@ public sealed class RaiderPlugin : BaseUnityPlugin
 
     private readonly Harmony _harmony = new(PluginInfo.PLUGIN_GUID);
 
-    private void Awake()
+    public override void Load()
     {
-        Log = Logger;
+        Log = base.Log;
         Instance = this;
 
-        // Read config for health endpoint
+        // Read config for health endpoint (BepInEx/config/com.malloc9.raider.cfg, written by the desktop app's installer)
         HealthTokenConfig = Config.Bind("Raider.Plugin", "HealthToken", "", "Per-install secret token for health endpoint authentication");
         HealthPortConfig = Config.Bind("Raider.Plugin", "HealthPort", 51837, "Health endpoint port (bound to 127.0.0.1)");
 
         // Initialize game access
         GameAccess.Initialize(Log);
-        
+
         // Start chore executor (for desktop app IPC)
         ChoreExecutor = new ChoreExecutor();
         _ = ChoreExecutor.StartIpcServerAsync();
-        
+
         // Start health server
         HealthServer = new HealthServer(HealthTokenConfig.Value, HealthPortConfig.Value, Log);
         HealthServer.Start();
-        
+
         Log.LogInfo($"Raider plugin {PluginInfo.PLUGIN_VERSION} loaded");
     }
 
-    private void OnDestroy()
+    public override bool Unload()
     {
         ChoreExecutor?.StopIpcServer();
         HealthServer?.Stop();
-        _harmony.UnpatchAll(PluginInfo.PLUGIN_GUID);
+        _harmony.UnpatchSelf();
         Log.LogInfo("Raider plugin unloaded");
+        return true;
     }
-    
+
     internal void ReloadHealthConfig()
     {
         HealthServer?.Stop();

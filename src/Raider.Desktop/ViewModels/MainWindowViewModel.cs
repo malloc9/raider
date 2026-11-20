@@ -181,7 +181,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
             if (result.Success)
             {
                 PluginStatus = PluginInstallState.Installed;
-                StatusMessage = "Plugin installed successfully. Start the game to connect.";
+                StatusMessage = "Plugin installed. Restart the game (its first start with BepInEx takes a few minutes).";
                 AddLog($"Plugin v{result.InstalledPluginVersion} and BepInEx v{result.InstalledBepInExVersion} installed");
                 
                 // Start health monitoring after install

@@ -25,7 +25,10 @@ public partial class App : Application
             {
                 // Core services
                 services.AddSingleton<IGameDetectionService, GameDetectionService>();
-                services.AddSingleton<IPluginInstallerService, PluginInstallerService>();
+                services.AddSingleton<IBepInExPackageProvider>(_ => new DownloadingBepInExPackageProvider());
+                services.AddSingleton<IPluginInstallerService>(sp => new PluginInstallerService(
+                    sp.GetRequiredService<ILogger<PluginInstallerService>>(),
+                    sp.GetRequiredService<IBepInExPackageProvider>()));
                 services.AddSingleton<IPluginHealthClient, PluginHealthClient>();
                 services.AddSingleton<IAccountSwitcher, PlariumPlayAccountSwitcher>();
                 services.AddSingleton<IGamePort>(sp => new PluginGamePort(sp.GetRequiredService<IAccountSwitcher>()));

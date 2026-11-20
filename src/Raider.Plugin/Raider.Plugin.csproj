@@ -1,20 +1,21 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>netstandard2.1</TargetFramework>
+    <!-- BepInEx 6 IL2CPP runs plugins on its bundled .NET 6 runtime -->
+    <TargetFramework>net6.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <LangVersion>latest</LangVersion>
+    <!-- net6.0 is out of support, but it is what BepInEx's runtime provides -->
+    <CheckEolTargetFramework>false</CheckEolTargetFramework>
+    <!-- BepInEx pins dependency versions its feed no longer has; the nearest ones are fine for compile-only refs -->
+    <NoWarn>$(NoWarn);NU1603</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="BepInEx.Analyzers" Version="1.0.0" PrivateAssets="all" />
-    <PackageReference Include="BepInEx.Core" Version="6.0.0-pre.1" PrivateAssets="all" />
-    <PackageReference Include="BepInEx.PluginInfoProps" Version="2.1.0" PrivateAssets="all" />
-    <PackageReference Include="System.Text.Json" Version="8.0.5" />
-    <PackageReference Include="UnityEngine.Modules" Version="2022.3.20" PrivateAssets="all" IncludeAssets="compile" />
-    <PackageReference Include="HarmonyX" Version="2.11.0" PrivateAssets="all" />
+    <!-- Must match BepInExBuild.Version in Raider.Core (the runtime the installer puts in the game folder) -->
+    <PackageReference Include="BepInEx.Unity.IL2CPP" Version="6.0.0-be.793" PrivateAssets="all" IncludeAssets="compile" />
   </ItemGroup>
 
   <ItemGroup>
