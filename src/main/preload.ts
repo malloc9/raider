@@ -4,6 +4,8 @@
 
 import { contextBridge, ipcRenderer } from 'electron';
 import type { Account, Routine, RoutineChore, ChoreId, Run } from '../shared/types';
+import type { InstallCheckResult, InstallOperationResult } from '../shared/types';
+import { IPC_CHANNELS, type AccountCreateRequest, type AccountDeleteRequest, type AccountRenameRequest, type RoutineGetRequest, type RoutineUpdateRequest, type RoutineReorderRequest, type RoutineToggleChoreRequest, type RunStartRequest, type RunProgressEvent, type RunCompleteEvent, type InstallerSetGamePathRequest } from './ipc';
 import { IPC_CHANNELS, type AccountCreateRequest, type AccountDeleteRequest, type AccountRenameRequest, type RoutineGetRequest, type RoutineUpdateRequest, type RoutineReorderRequest, type RoutineToggleChoreRequest, type RunStartRequest, type RunChoreRequest, type RunProgressEvent, type RunCompleteEvent } from './ipc';
 
 contextBridge.exposeInMainWorld('raiderAPI', {
@@ -36,6 +38,15 @@ contextBridge.exposeInMainWorld('raiderAPI', {
       ipcRenderer.on(IPC_CHANNELS['run:complete'], (_e, event) => callback(event));
       return () => ipcRenderer.removeListener(IPC_CHANNELS['run:complete'], (_e, event) => callback(event));
     }
+  },
+
+  // Installer
+  installer: {
+    check: (): Promise<InstallCheckResult> => ipcRenderer.invoke(IPC_CHANNELS['installer:check']),
+    install: (): Promise<InstallOperationResult> => ipcRenderer.invoke(IPC_CHANNELS['installer:install']),
+    remove: (): Promise<InstallOperationResult> => ipcRenderer.invoke(IPC_CHANNELS['installer:remove']),
+    getGamePath: (): Promise<string | null> => ipcRenderer.invoke(IPC_CHANNELS['installer:get-game-path']),
+    setGamePath: (gamePath: string): Promise<void> => ipcRenderer.invoke(IPC_CHANNELS['installer:set-game-path'], { gamePath } as InstallerSetGamePathRequest)
   }
 });
 
