@@ -122,6 +122,70 @@ export interface SettingsPort {
 }
 
 /**
+ * Installation status of BepInEx and Raider plugin.
+ */
+export type InstallStatus = 
+  | 'not-installed'
+  | 'installed'
+  | 'needs-repair'
+  | 'incompatible-bepinex'
+  | 'unknown';
+
+/**
+ * Result of an installation check.
+ */
+export interface InstallCheckResult {
+  status: InstallStatus;
+  message?: string;
+  details?: {
+    bepinexPresent: boolean;
+    bepinexOwned: boolean;
+    bepinexCompatible: boolean;
+    pluginPresent: boolean;
+    pluginOwned: boolean;
+    manifestPresent: boolean;
+    foreignPlugins: string[];
+    disableFolders: string[];
+  };
+}
+
+/**
+ * Install manifest recording what Raider installed.
+ */
+export interface InstallManifest {
+  version: number;
+  installedAt: string; // ISO timestamp
+  bepinexOwned: boolean;
+  files: string[]; // Relative paths from game folder
+  folders: string[]; // Relative paths from game folder
+}
+
+/**
+ * Result of an install/repair/remove operation.
+ */
+export interface InstallOperationResult {
+  success: boolean;
+  message?: string;
+  error?: string;
+}
+
+/**
+ * Port interface for Game installation management.
+ */
+export interface InstallerPort {
+  /** Check installation status */
+  checkInstallation(gamePath: string): Promise<InstallCheckResult>;
+  /** Install or repair Raider in the game folder */
+  install(gamePath: string): Promise<InstallOperationResult>;
+  /** Remove Raider from the game folder */
+  remove(gamePath: string): Promise<InstallOperationResult>;
+  /** Get the game folder path */
+  getGamePath(): Promise<string | null>;
+  /** Set the game folder path */
+  setGamePath(path: string): Promise<void>;
+}
+
+/**
  * Default routine with all six v1 chores enabled in default order.
  */
 export function createDefaultRoutine(): Routine {

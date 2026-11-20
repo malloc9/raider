@@ -7,7 +7,8 @@ import path from 'path';
 import { settingsPort } from './settings';
 import { runRoutine, type OrchestratorDeps } from './orchestrator';
 import { createFakeGamePort, RealGamePort } from './game-port';
-import { IPC_CHANNELS, type RoutineGetRequest, type RoutineUpdateRequest, type RoutineReorderRequest, type RoutineToggleChoreRequest, type AccountCreateRequest, type AccountDeleteRequest, type AccountRenameRequest, type RunStartRequest } from './ipc';
+import { installerPort } from './installer';
+import { IPC_CHANNELS, type RoutineGetRequest, type RoutineUpdateRequest, type RoutineReorderRequest, type RoutineToggleChoreRequest, type AccountCreateRequest, type AccountDeleteRequest, type AccountRenameRequest, type RunStartRequest, type InstallerSetGamePathRequest } from './ipc';
 import type { Account, Routine, ChoreId, Run } from '../shared/types';
 import { createAccount, createDefaultRoutine } from '../shared/types';
 
@@ -42,7 +43,19 @@ function createWindow(): void {
   });
 }
 
-app.whenReady().then(() => {
+async function checkAndRepairInstallation(): Promise<void> {
+  const gamePath = await installerPort.getGamePath();
+  if (!gamePath) return;
+  
+  const check = await installerPort.checkInstallation(gamePath);
+  if (check.status === 'needs-repair') {
+    console.log('[Installer] Installation needs repair, repairing...');
+    await installerPort.install(gamePath);
+  }
+}
+
+app.whenReady().then(async () => {
+  await checkAndRepairInstallation();
   createWindow();
 
   app.on('activate', () => {
@@ -132,6 +145,9 @@ ipcMain.handle(IPC_CHANNELS['routine:toggle-chore'], async (_event, request: Rou
 
 // Runs
 ipcMain.handle(IPC_CHANNELS['run:start'], async (_event, request: RunStartRequest): Promise<{ runId: string }> => {
+  // Check and repair installation before each run
+  await checkAndRepairInstallation();
+  
   const accounts = await settingsPort.loadAccounts();
   const account = accounts.find(a => a.id === request.accountId);
   if (!account) throw new Error('Account not found');
@@ -172,5 +188,38 @@ ipcMain.handle(IPC_CHANNELS['run:cancel'], async (_event, { runId }: { runId: st
   }
 });
 
+// Installer IPC handlers
+ipcMain.handle(IPC_CHANNELS['installer:check'], async (): Promise<any> => {
+  const gamePath = await installerPort.getGamePath();
+  if (!gamePath) {
+    return { status: 'unknown', message: 'Game path not configured.' };
+  }
+  return installerPort.checkInstallation(gamePath);
+});
+
+ipcMain.handle(IPC_CHANNELS['installer:install'], async (): Promise<any> => {
+  const gamePath = await installerPort.getGamePath();
+  if (!gamePath) {
+    return { success: false, error: 'Game path not configured.' };
+  }
+  return installerPort.install(gamePath);
+});
+
+ipcMain.handle(IPC_CHANNELS['installer:remove'], async (): Promise<any> => {
+  const gamePath = await installerPort.getGamePath();
+  if (!gamePath) {
+    return { success: false, error: 'Game path not configured.' };
+  }
+  return installerPort.remove(gamePath);
+});
+
+ipcMain.handle(IPC_CHANNELS['installer:get-game-path'], async (): Promise<string | null> => {
+  return installerPort.getGamePath();
+});
+
+ipcMain.handle(IPC_CHANNELS['installer:set-game-path'], async (_event, request: InstallerSetGamePathRequest): Promise<void> => {
+  await installerPort.setGamePath(request.gamePath);
+});
+
 // Export for testing
-export { settingsPort, gamePort, orchestratorDeps, runningRuns, createWindow };
+export { settingsPort, gamePort, orchestratorDeps, runningRuns, createWindow, installerPort };

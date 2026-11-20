@@ -3,6 +3,7 @@
  */
 
 import type { Account, Routine, RoutineChore, ChoreId, Run } from '../shared/types';
+import type { InstallCheckResult, InstallOperationResult } from '../shared/types';
 
 export const IPC_CHANNELS = {
   // Account management
@@ -21,8 +22,23 @@ export const IPC_CHANNELS = {
   'run:start': 'run:start',
   'run:cancel': 'run:cancel',
   'run:progress': 'run:progress',
-  'run:complete': 'run:complete'
+  'run:complete': 'run:complete',
+
+  // Installer
+  'installer:check': 'installer:check',
+  'installer:install': 'installer:install',
+  'installer:remove': 'installer:remove',
+  'installer:get-game-path': 'installer:get-game-path',
+  'installer:set-game-path': 'installer:set-game-path'
 } as const;
+
+// Installer types
+export type InstallerCheckResponse = InstallCheckResult;
+export type InstallerInstallResponse = InstallOperationResult;
+export type InstallerRemoveResponse = InstallOperationResult;
+export type InstallerGetGamePathResponse = string | null;
+export type InstallerSetGamePathRequest = { gamePath: string };
+export type InstallerSetGamePathResponse = void;
 
 export type AccountsListResponse = Account[];
 export type AccountCreateRequest = { name: string };
