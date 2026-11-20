@@ -108,9 +108,9 @@ public sealed class CollectInboxChoreTests
             outcome = "Success",
             collected = new[]
             {
-                new { itemId = "item-1", itemType = "Silver", rewards = new { silver = 10000 } },
-                new { itemId = "item-2", itemType = "Energy", rewards = new { energy = 50 } },
-                new { itemId = "item-3", itemType = "Shard", rewards = new { ancientShard = 1 } }
+                new { itemId = "item-1", itemType = "Silver", rewards = (object)new { silver = 10000 } },
+                new { itemId = "item-2", itemType = "Energy", rewards = (object)new { energy = 50 } },
+                new { itemId = "item-3", itemType = "Shard", rewards = (object)new { ancientShard = 1 } }
             },
             leftInInbox = 2
         };
@@ -178,7 +178,7 @@ public sealed class CollectInboxChoreTests
             outcome = "Success",
             collected = new[]
             {
-                new { itemId = "item-1", itemType = "Silver", rewards = new { silver = 10000 } }
+                new { itemId = "item-1", itemType = "Silver", rewards = (object)new { silver = 10000 } }
             },
             leftInInbox = 1
         };

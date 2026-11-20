@@ -18,34 +18,33 @@ public sealed class WindowsNotificationService : INotificationService
         }
 
         var title = $"Raider: Run completed with failures";
-        var body = $"Account {run.Account.DisplayName}: {run.FailureCount} chore(s) failed";
+        var body = run.Status == RunStatus.SwitchFailed
+            ? $"Account {run.Account.DisplayName}: account switch failed: {run.StatusMessage}"
+            : $"Account {run.Account.DisplayName}: {run.FailureCount} chore(s) failed";
 
         if (run.IsGameBuildMismatch)
         {
             body += $" ({run.BrokenByGameUpdateCount} broken by game update)";
         }
 
-        // Build toast content
-        var toastContent = new ToastContent
-        {
-            Visual = new ToastVisual
-            {
-                BindingGeneric = new ToastBindingGeneric
-                {
-                    Children =
-                    {
-                        new AdaptiveText { Text = title },
-                        new AdaptiveText { Text = body }
-                    }
-                }
-            }
-        };
+        await ShowToastAsync(title, body, cancellationToken);
+    }
 
-        var toast = new ToastNotification(toastContent.GetXml());
-        
-        // Show the toast
-        ToastNotificationManagerCompat.CreateToastNotifier().Show(toast);
-        
+    public async Task ShowManualLoginRequiredNotificationAsync(Account account, CancellationToken cancellationToken = default)
+    {
+        await ShowToastAsync(
+            "Raider: log in by hand",
+            $"Account {account.DisplayName} ({account.PlariumLogin}) needs its password. Log in to it in Plarium Play, then run it again.",
+            cancellationToken);
+    }
+
+    private static async Task ShowToastAsync(string title, string body, CancellationToken cancellationToken)
+    {
+        new ToastContentBuilder()
+            .AddText(title)
+            .AddText(body)
+            .Show();
+
         // Small delay to ensure notification is sent
         await Task.Delay(100, cancellationToken);
     }

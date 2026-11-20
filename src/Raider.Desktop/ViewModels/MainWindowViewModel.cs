@@ -1,13 +1,13 @@
 namespace Raider.Desktop.ViewModels;
 
-namespace Raider.Desktop.ViewModels;
-
 using CommunityToolkit.Mvvm.ComponentModel;
+using Microsoft.Extensions.Logging;
 using CommunityToolkit.Mvvm.Input;
 using Raider.Core.Models;
 using Raider.Core.Services;
 using Raider.Core.Ports;
 using System.Collections.ObjectModel;
+using System.IO;
 using System.Windows;
 using System.Windows.Data;
 
@@ -20,8 +20,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly IPluginInstallerService _pluginInstallerService;
     private readonly IPluginHealthClient _pluginHealthClient;
     private readonly IGamePort _gamePort;
+    private readonly IAccountStore _accountStore;
+    private readonly RunOrchestrator _runOrchestrator;
     private readonly ILogger<MainWindowViewModel> _logger;
-    
+
     private GameInstallation? _gameInstallation;
     private string _token = string.Empty;
     private CancellationTokenSource? _healthCheckCts;
@@ -32,13 +34,20 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IPluginInstallerService pluginInstallerService,
         IPluginHealthClient pluginHealthClient,
         IGamePort gamePort,
+        IAccountStore accountStore,
+        RunOrchestrator runOrchestrator,
         ILogger<MainWindowViewModel> logger)
     {
         _gameDetectionService = gameDetectionService;
         _pluginInstallerService = pluginInstallerService;
         _pluginHealthClient = pluginHealthClient;
         _gamePort = gamePort;
+        _accountStore = accountStore;
+        _runOrchestrator = runOrchestrator;
         _logger = logger;
+        Accounts = new ObservableCollection<AccountItemViewModel>();
+        _newPlariumLogin = string.Empty;
+        _newDisplayName = string.Empty;
 
         PluginStatus = PluginInstallState.NotInstalled;
         GameBuild = "Unknown";
@@ -82,6 +91,7 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// </summary>
     public async Task InitializeAsync()
     {
+        await LoadAccountsAsync();
         await DetectGameAndCheckStatusAsync();
         StartHealthMonitoring();
     }
@@ -256,6 +266,157 @@ public sealed partial class MainWindowViewModel : ObservableObject
                 }
             }
         }, _healthCheckCts.Token);
+    }
+
+    // ---- Accounts ----
+
+    /// <summary>The player's Accounts, each with its own Routine.</summary>
+    public ObservableCollection<AccountItemViewModel> Accounts { get; }
+
+    /// <summary>Plarium login (email/username) of the Account to add. Never a password.</summary>
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(AddAccountCommand))]
+    private string _newPlariumLogin;
+
+    [ObservableProperty]
+    private string _newDisplayName;
+
+    [ObservableProperty]
+    [NotifyCanExecuteChangedFor(nameof(RunAccountCommand), nameof(RunAllAccountsCommand))]
+    private bool _isRunning;
+
+    private async Task LoadAccountsAsync()
+    {
+        try
+        {
+            var accounts = await _accountStore.LoadAsync();
+            Accounts.Clear();
+            foreach (var account in accounts)
+            {
+                Accounts.Add(new AccountItemViewModel(account, SaveAccountsInBackground));
+            }
+            AddLog($"Loaded {accounts.Count} account(s)");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error loading accounts");
+            AddLog($"Could not load accounts: {ex.Message}");
+        }
+    }
+
+    private bool CanAddAccount() => !string.IsNullOrWhiteSpace(NewPlariumLogin);
+
+    [RelayCommand(CanExecute = nameof(CanAddAccount))]
+    private async Task AddAccountAsync()
+    {
+        var login = NewPlariumLogin.Trim();
+        if (Accounts.Any(a => string.Equals(a.PlariumLogin, login, StringComparison.OrdinalIgnoreCase)))
+        {
+            StatusMessage = $"Account {login} is already added";
+            return;
+        }
+
+        var displayName = string.IsNullOrWhiteSpace(NewDisplayName) ? login : NewDisplayName.Trim();
+        var account = new Account(Guid.NewGuid().ToString("N")[..12], login, displayName, Routine.Default());
+        Accounts.Add(new AccountItemViewModel(account, SaveAccountsInBackground));
+        NewPlariumLogin = string.Empty;
+        NewDisplayName = string.Empty;
+
+        await SaveAccountsAsync();
+        AddLog($"Added account {displayName} ({login})");
+    }
+
+    [RelayCommand]
+    private async Task RemoveAccountAsync(AccountItemViewModel? item)
+    {
+        if (item == null || IsRunning)
+            return;
+
+        Accounts.Remove(item);
+        await SaveAccountsAsync();
+        AddLog($"Removed account {item.DisplayName}");
+    }
+
+    private bool CanRun(AccountItemViewModel? item) => !IsRunning;
+
+    [RelayCommand(CanExecute = nameof(CanRun))]
+    private Task RunAccountAsync(AccountItemViewModel? item)
+        => item == null ? Task.CompletedTask : RunAccountsAsync(new[] { item });
+
+    private bool CanRunAll() => !IsRunning;
+
+    [RelayCommand(CanExecute = nameof(CanRunAll))]
+    private Task RunAllAccountsAsync() => RunAccountsAsync(Accounts.ToList());
+
+    private async Task RunAccountsAsync(IReadOnlyList<AccountItemViewModel> items)
+    {
+        if (items.Count == 0)
+            return;
+
+        IsRunning = true;
+        var logDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Raider", "logs", DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+
+        try
+        {
+            // One at a time in the single game instance, switching Accounts between Runs
+            foreach (var item in items)
+            {
+                item.Status = "Running...";
+                item.NeedsManualLogin = false;
+                AddLog($"Run started for {item.DisplayName}");
+
+                var run = await _runOrchestrator.ExecuteRunAsync(item.ToAccount(), Path.Combine(logDirectory, item.Id));
+                ReportRun(item, run);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Run failed");
+            StatusMessage = $"Run failed: {ex.Message}";
+            AddLog($"Run failed: {ex.Message}");
+        }
+        finally
+        {
+            IsRunning = false;
+        }
+    }
+
+    private void ReportRun(AccountItemViewModel item, Run run)
+    {
+        switch (run.Status)
+        {
+            case RunStatus.NeedsManualLogin:
+                item.NeedsManualLogin = true;
+                item.Status = "Log in by hand in Plarium Play, then run again";
+                StatusMessage = $"{item.DisplayName} needs you to log in by hand in Plarium Play";
+                AddLog($"{item.DisplayName}: Plarium Play asks for the password. Log in by hand; continuing with the next account.");
+                break;
+            case RunStatus.SwitchFailed:
+                item.Status = $"Account switch failed: {run.StatusMessage}";
+                AddLog($"{item.DisplayName}: account switch failed: {run.StatusMessage}");
+                break;
+            default:
+                item.Status = $"Done: {run.SuccessCount} ok, {run.FailureCount} failed";
+                AddLog($"{item.DisplayName}: {run.SuccessCount} chore(s) succeeded, {run.FailureCount} failed");
+                break;
+        }
+    }
+
+    private void SaveAccountsInBackground() => _ = SaveAccountsAsync();
+
+    private async Task SaveAccountsAsync()
+    {
+        try
+        {
+            await _accountStore.SaveAsync(Accounts.Select(a => a.ToAccount()).ToList());
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error saving accounts");
+            AddLog($"Could not save accounts: {ex.Message}");
+        }
     }
 
     private void AddLog(string message)

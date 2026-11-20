@@ -108,9 +108,9 @@ public sealed class ClaimPlaytimeRewardsChoreTests
             outcome = "Success",
             claimed = new[]
             {
-                new { rewardId = "gift-1", rewardType = "Energy", rewards = new { energy = 30 } },
-                new { rewardId = "gift-2", rewardType = "Silver", rewards = new { silver = 50000 } },
-                new { rewardId = "gift-3", rewardType = "Mystery Shard", rewards = new { mysteryShard = 1 } }
+                new { rewardId = "gift-1", rewardType = "Energy", rewards = (object)new { energy = 30 } },
+                new { rewardId = "gift-2", rewardType = "Silver", rewards = (object)new { silver = 50000 } },
+                new { rewardId = "gift-3", rewardType = "Mystery Shard", rewards = (object)new { mysteryShard = 1 } }
             },
             remaining = 2
         };
@@ -178,7 +178,7 @@ public sealed class ClaimPlaytimeRewardsChoreTests
             outcome = "Success",
             claimed = new[]
             {
-                new { rewardId = "gift-1", rewardType = "Energy", rewards = new { energy = 30 } }
+                new { rewardId = "gift-1", rewardType = "Energy", rewards = (object)new { energy = 30 } }
             },
             remaining = 1
         };

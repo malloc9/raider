@@ -3,6 +3,7 @@ namespace Raider.Desktop;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Raider.Core.Models;
 using Raider.Core.Services;
 using Raider.Core.Ports;
 using Raider.Desktop.Services;
@@ -26,8 +27,18 @@ public partial class App : Application
                 services.AddSingleton<IGameDetectionService, GameDetectionService>();
                 services.AddSingleton<IPluginInstallerService, PluginInstallerService>();
                 services.AddSingleton<IPluginHealthClient, PluginHealthClient>();
-                services.AddSingleton<IGamePort>(_ => new PluginGamePort());
+                services.AddSingleton<IAccountSwitcher, PlariumPlayAccountSwitcher>();
+                services.AddSingleton<IGamePort>(sp => new PluginGamePort(sp.GetRequiredService<IAccountSwitcher>()));
                 services.AddSingleton<INotificationService, WindowsNotificationService>();
+                services.AddSingleton<IAccountStore>(_ => new JsonAccountStore());
+                services.AddSingleton<ISnapshotService, SnapshotService>();
+                // No target game build pinned yet (Unknown): failures count as plain failures, not "broken by game update"
+                services.AddSingleton(sp => new RunOrchestrator(
+                    sp.GetRequiredService<IGamePort>(),
+                    sp.GetRequiredService<ISnapshotService>(),
+                    sp.GetRequiredService<INotificationService>(),
+                    GameBuild.Unknown,
+                    sp.GetRequiredService<ILogger<RunOrchestrator>>()));
                 
                 // ViewModels
                 services.AddSingleton<MainWindowViewModel>();
@@ -64,6 +75,6 @@ public partial class App : Application
 
     public static T GetService<T>() where T : notnull
     {
-        return Current._host!.Services.GetRequiredService<T>();
+        return ((App)Current)._host!.Services.GetRequiredService<T>();
     }
 }

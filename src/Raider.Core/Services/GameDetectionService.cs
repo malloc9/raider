@@ -69,6 +69,9 @@ public sealed class GameDetectionService : IGameDetectionService
     {
         try
         {
+            if (!OperatingSystem.IsWindows())
+                return null;
+
             using var key = Registry.CurrentUser.OpenSubKey(PlariumPlayRegistryKey);
             if (key == null)
                 return null;
@@ -103,6 +106,9 @@ public sealed class GameDetectionService : IGameDetectionService
     {
         try
         {
+            if (!OperatingSystem.IsWindows())
+                return null;
+
             using var key = Registry.CurrentUser.OpenSubKey(PlariumPlayRegistryKey);
             if (key == null)
                 return null;
