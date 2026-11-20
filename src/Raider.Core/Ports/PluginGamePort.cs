@@ -7,6 +7,7 @@ using Raider.Core.Models;
 
 /// <summary>
 /// Game port implementation that communicates with the in-process plugin via HTTP.
+/// Each instance has its own token/port for communication.
 /// </summary>
 public sealed class PluginGamePort : IGamePort
 {
@@ -15,7 +16,7 @@ public sealed class PluginGamePort : IGamePort
     private readonly JsonSerializerOptions _jsonOptions;
     private readonly IAccountSwitcher? _accountSwitcher;
     private readonly TimeSpan _pluginStartupTimeout = TimeSpan.FromMinutes(3);
-    private string? _currentPlariumLogin;
+    private readonly Dictionary<string, string?> _currentPlayerId = new();
 
     public PluginGamePort(IAccountSwitcher? accountSwitcher = null, string pluginBaseUrl = "http://localhost:51838/raider/")
     {
@@ -56,15 +57,14 @@ public sealed class PluginGamePort : IGamePort
     }
 
     /// <inheritdoc />
-    public Task<string?> GetCurrentPlariumLoginAsync(CancellationToken cancellationToken = default)
+    public Task<string?> GetCurrentPlayerIdAsync(CancellationToken cancellationToken = default)
     {
-        // The game process cannot tell which Plarium login it runs under (see docs/account-switching-findings.md),
-        // so this is the last login Raider switched to. Null until the first switch, which forces one.
-        return Task.FromResult(_currentPlariumLogin);
+        // Return the first tracked player ID, or null
+        return Task.FromResult(_currentPlayerId.Values.FirstOrDefault());
     }
 
     /// <inheritdoc />
-    public async Task<AccountSwitchResult> SwitchAccountAsync(Account account, CancellationToken cancellationToken = default)
+    public async Task<AccountSwitchResult> SwitchAccountAsync(string instanceToken, Account account, CancellationToken cancellationToken = default)
     {
         if (_accountSwitcher == null)
         {
@@ -72,9 +72,16 @@ public sealed class PluginGamePort : IGamePort
         }
 
         // The relaunched game must not be confused with the old one still answering
-        _currentPlariumLogin = null;
+        _currentPlayerId[instanceToken] = null;
 
-        var result = await _accountSwitcher.SwitchToAsync(account.PlariumLogin, cancellationToken);
+        // The plugin uses the instance token to identify which game instance to switch
+        var switchRequest = new PluginSwitchRequest
+        {
+            InstanceToken = instanceToken,
+            PlariumLogin = account.Id // Use player ID as the login identifier
+        };
+
+        var result = await _accountSwitcher.SwitchToAsync(switchRequest, cancellationToken);
         if (result.Outcome != AccountSwitchOutcome.Switched)
         {
             return result;
@@ -84,9 +91,9 @@ public sealed class PluginGamePort : IGamePort
         var deadline = DateTimeOffset.UtcNow + _pluginStartupTimeout;
         while (DateTimeOffset.UtcNow < deadline)
         {
-            if (await IsPluginHealthyAsync(cancellationToken))
+            if (await IsPluginHealthyAsync(instanceToken, cancellationToken))
             {
-                _currentPlariumLogin = account.PlariumLogin;
+                _currentPlayerId[instanceToken] = account.Id;
                 return result;
             }
 
@@ -97,10 +104,11 @@ public sealed class PluginGamePort : IGamePort
     }
 
     /// <inheritdoc />
-    public async Task<ChoreExecutionResult> ExecuteChoreAsync(Chore chore, CancellationToken cancellationToken = default)
+    public async Task<ChoreExecutionResult> ExecuteChoreAsync(string instanceToken, Chore chore, CancellationToken cancellationToken = default)
     {
         var request = new PluginChoreRequest
         {
+            InstanceToken = instanceToken,
             ChoreType = chore.Type.ToString(),
             Parameters = new Dictionary<string, object>()
         };
@@ -149,11 +157,11 @@ public sealed class PluginGamePort : IGamePort
     }
 
     /// <inheritdoc />
-    public async Task<string> GetGameStateJsonAsync(CancellationToken cancellationToken = default)
+    public async Task<string> GetGameStateJsonAsync(string instanceToken, CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.GetAsync("game-state", cancellationToken);
+            var response = await _httpClient.GetAsync($"game-state?instanceToken={Uri.EscapeDataString(instanceToken)}", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
                 return await response.Content.ReadAsStringAsync(cancellationToken);
@@ -167,11 +175,11 @@ public sealed class PluginGamePort : IGamePort
     }
 
     /// <inheritdoc />
-    public async Task<string> GetPluginLogExcerptAsync(int maxLines, CancellationToken cancellationToken = default)
+    public async Task<string> GetPluginLogExcerptAsync(string instanceToken, int maxLines, CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.GetAsync($"plugin-log?maxLines={maxLines}", cancellationToken);
+            var response = await _httpClient.GetAsync($"plugin-log?instanceToken={Uri.EscapeDataString(instanceToken)}&maxLines={maxLines}", cancellationToken);
             if (response.IsSuccessStatusCode)
             {
                 var result = await response.Content.ReadFromJsonAsync<PluginLogResponse>(_jsonOptions, cancellationToken);
@@ -186,13 +194,13 @@ public sealed class PluginGamePort : IGamePort
     }
 
     /// <summary>
-    /// Checks if the plugin is reachable.
+    /// Checks if the plugin is reachable for a specific instance.
     /// </summary>
-    public async Task<bool> IsPluginHealthyAsync(CancellationToken cancellationToken = default)
+    public async Task<bool> IsPluginHealthyAsync(string instanceToken, CancellationToken cancellationToken = default)
     {
         try
         {
-            var response = await _httpClient.GetAsync("health", cancellationToken);
+            var response = await _httpClient.GetAsync($"health?instanceToken={Uri.EscapeDataString(instanceToken)}", cancellationToken);
             return response.IsSuccessStatusCode;
         }
         catch
@@ -223,10 +231,20 @@ public sealed class PluginGamePort : IGamePort
     }
 
     /// <summary>
+    /// Request sent to the plugin to switch accounts.
+    /// </summary>
+    private sealed class PluginSwitchRequest
+    {
+        public string InstanceToken { get; set; } = string.Empty;
+        public string PlariumLogin { get; set; } = string.Empty;
+    }
+
+    /// <summary>
     /// Request sent to the plugin to execute a chore.
     /// </summary>
     private sealed class PluginChoreRequest
     {
+        public string InstanceToken { get; set; } = string.Empty;
         public string ChoreType { get; set; } = string.Empty;
         public Dictionary<string, object> Parameters { get; set; } = new();
     }

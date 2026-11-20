@@ -4,7 +4,7 @@ using Raider.Core.Models;
 using Raider.Core.Ports;
 
 /// <summary>
-/// Orchestrates the execution of a Run for an Account.
+/// Orchestrates the execution of a Run for an Account on a specific Instance.
 /// </summary>
 public sealed class RunOrchestrator
 {
@@ -13,6 +13,11 @@ public sealed class RunOrchestrator
     private readonly INotificationService _notificationService;
     private readonly GameBuild _targetedGameBuild;
     private readonly ILogger<RunOrchestrator> _logger;
+
+    /// <summary>
+    /// Gets the targeted game build for this orchestrator.
+    /// </summary>
+    public GameBuild TargetedGameBuild => _targetedGameBuild;
 
     public RunOrchestrator(
         IGamePort gamePort,
@@ -29,21 +34,21 @@ public sealed class RunOrchestrator
     }
 
     /// <summary>
-    /// Executes a complete Run for the given account.
+    /// Executes a complete Run for the given account on the specified instance.
     /// </summary>
     public async Task<Run> ExecuteRunAsync(
         Account account,
+        string instanceToken,
         string logDirectory,
         CancellationToken cancellationToken = default)
     {
         var runId = Guid.NewGuid().ToString("N")[..12];
         var startedAt = DateTimeOffset.UtcNow;
         
-        _logger.LogInformation("Starting run {RunId} for account {AccountId}", runId, account.Id);
+        _logger.LogInformation("Starting run {RunId} for account {AccountId} on instance {InstanceToken}", runId, account.Id, instanceToken);
 
         // Get actual game build
         var actualGameBuild = await _gamePort.GetGameBuildAsync(cancellationToken);
-        // An Unknown target means no build is pinned, so nothing can be a mismatch
         var isBuildMismatch = _targetedGameBuild != GameBuild.Unknown && !_targetedGameBuild.Matches(actualGameBuild);
         
         if (isBuildMismatch)
@@ -55,11 +60,11 @@ public sealed class RunOrchestrator
         }
 
         // Account switch, only when the game is on another (or an unknown) Account
-        var currentLogin = await _gamePort.GetCurrentPlariumLoginAsync(cancellationToken);
-        if (!string.Equals(currentLogin, account.PlariumLogin, StringComparison.OrdinalIgnoreCase))
+        var currentPlayerId = await _gamePort.GetCurrentPlayerIdAsync(cancellationToken);
+        if (!string.Equals(currentPlayerId, account.Id, StringComparison.OrdinalIgnoreCase))
         {
-            _logger.LogInformation("Switching from {CurrentLogin} to account {AccountId}", currentLogin ?? "(unknown)", account.Id);
-            var switchResult = await _gamePort.SwitchAccountAsync(account, cancellationToken);
+            _logger.LogInformation("Switching from {CurrentPlayerId} to account {AccountId}", currentPlayerId ?? "(unknown)", account.Id);
+            var switchResult = await _gamePort.SwitchAccountAsync(instanceToken, account, cancellationToken);
 
             if (switchResult.Outcome != AccountSwitchOutcome.Switched)
             {
@@ -71,10 +76,12 @@ public sealed class RunOrchestrator
 
         foreach (var chore in account.Routine.Chores)
         {
+            cancellationToken.ThrowIfCancellationRequested();
+            
             var choreStartedAt = DateTimeOffset.UtcNow;
             _logger.LogInformation("Executing chore {ChoreId} ({ChoreName})", chore.Id, chore.Name);
 
-            var executionResult = await _gamePort.ExecuteChoreAsync(chore, cancellationToken);
+            var executionResult = await _gamePort.ExecuteChoreAsync(instanceToken, chore, cancellationToken);
             var choreCompletedAt = DateTimeOffset.UtcNow;
 
             ChoreResult choreResult;
@@ -92,8 +99,8 @@ public sealed class RunOrchestrator
                     : ChoreOutcome.Failed;
 
                 // Get game state and log excerpt for snapshot
-                var gameStateJson = await _gamePort.GetGameStateJsonAsync(cancellationToken);
-                var pluginLogExcerpt = await _gamePort.GetPluginLogExcerptAsync(50, cancellationToken);
+                var gameStateJson = await _gamePort.GetGameStateJsonAsync(instanceToken, cancellationToken);
+                var pluginLogExcerpt = await _gamePort.GetPluginLogExcerptAsync(instanceToken, 50, cancellationToken);
 
                 // Create chore result with correct outcome for snapshot
                 var choreResultForSnapshot = new ChoreResult(
@@ -154,25 +161,32 @@ public sealed class RunOrchestrator
     }
 
     /// <summary>
-    /// Runs several Accounts one at a time in the single game instance, in the given order.
-    /// An Account whose switch needs a password is stopped and the remaining Accounts continue.
-    /// Each Account's logs and snapshots go to its own subfolder of <paramref name="logDirectory"/>.
+    /// Executes a Run that ends with InstanceLost status (Game day not marked done).
     /// </summary>
-    public async Task<IReadOnlyList<Run>> ExecuteRunsAsync(
-        IEnumerable<Account> accounts,
+    public async Task<Run> ExecuteRunWithInstanceLostAsync(
+        Account account,
+        string instanceToken,
         string logDirectory,
         CancellationToken cancellationToken = default)
     {
-        var runs = new List<Run>();
+        var runId = Guid.NewGuid().ToString("N")[..12];
+        var startedAt = DateTimeOffset.UtcNow;
+        
+        // We don't execute chores, just return InstanceLost
+        var run = new Run(
+            runId,
+            account,
+            _targetedGameBuild,
+            GameBuild.Unknown,
+            Array.Empty<ChoreResult>(),
+            startedAt,
+            DateTimeOffset.UtcNow,
+            logDirectory,
+            RunStatus.InstanceLost,
+            "Instance lost mid-run");
 
-        foreach (var account in accounts)
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-            var accountLogDirectory = Path.Combine(logDirectory, account.Id);
-            runs.Add(await ExecuteRunAsync(account, accountLogDirectory, cancellationToken));
-        }
-
-        return runs;
+        _logger.LogWarning("Run {RunId} ended with InstanceLost for account {AccountId}", runId, account.Id);
+        return run;
     }
 
     private async Task<Run> StopRunAsync(

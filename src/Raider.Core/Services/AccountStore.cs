@@ -16,7 +16,8 @@ public interface IAccountStore
 
 /// <summary>
 /// Stores Accounts as JSON in roaming app data (ADR 0002): %APPDATA%\Raider\raider-settings.json.
-/// Only the Plarium login (an email/username used to pick a remembered login) is stored, never a password.
+/// Account format: Id (player ID), DisplayName, Routine, LastRunGameDay, LastOutcome.
+/// Old entries with PlariumLogin are discarded on load.
 /// </summary>
 public sealed class JsonAccountStore : IAccountStore
 {
@@ -48,7 +49,30 @@ public sealed class JsonAccountStore : IAccountStore
 
         await using var stream = File.OpenRead(_filePath);
         var settings = await JsonSerializer.DeserializeAsync<SettingsFile>(stream, JsonOptions, cancellationToken);
-        return settings?.Accounts ?? new List<Account>();
+        
+        if (settings?.Accounts == null)
+        {
+            return Array.Empty<Account>();
+        }
+
+        // Filter out old format entries (those with PlariumLogin) and migrate
+        var migrated = new List<Account>();
+        foreach (var account in settings.Accounts)
+        {
+            if (account.PlariumLogin != null)
+            {
+                // Old format - discard as per requirement
+                continue;
+            }
+            migrated.Add(account with 
+            { 
+                // Ensure default values for new fields
+                LastRunGameDay = account.LastRunGameDay,
+                LastOutcome = account.LastOutcome
+            });
+        }
+
+        return migrated;
     }
 
     public async Task SaveAsync(IReadOnlyList<Account> accounts, CancellationToken cancellationToken = default)

@@ -1,5 +1,11 @@
 namespace Raider.Tests.Unit;
 
+using Raider.Core.Models;
+using Raider.Core.Services;
+using Raider.Tests.TestHelpers;
+using Xunit;
+using FluentAssertions;
+
 public sealed class JsonAccountStoreTests : IDisposable
 {
     private readonly string _directory = Path.Combine(Path.GetTempPath(), "raider-tests", Guid.NewGuid().ToString());
@@ -31,8 +37,8 @@ public sealed class JsonAccountStoreTests : IDisposable
     [Fact]
     public async Task SaveThenLoad_RoundTripsAccountsWithTheirOwnRoutines()
     {
-        var alice = TestDataBuilder.CreateAccount("alice", "alice@example.com", "Alice", Routine.Default());
-        var bob = TestDataBuilder.CreateAccount("bob", "bob@example.com", "Bob",
+        var alice = TestDataBuilder.CreateAccount("alice", "Alice", Routine.Default());
+        var bob = TestDataBuilder.CreateAccount("bob", "Bob",
             TestDataBuilder.CreateRoutine(TestDataBuilder.CreateChore("gem", "Collect Gem Mine", ChoreType.CollectGemMine)));
 
         await _store.SaveAsync(new[] { alice, bob });
@@ -46,8 +52,8 @@ public sealed class JsonAccountStoreTests : IDisposable
     [Fact]
     public async Task Save_AfterRemovingAnAccount_PersistsTheRemoval()
     {
-        var alice = TestDataBuilder.CreateAccount("alice", "alice@example.com", "Alice");
-        var bob = TestDataBuilder.CreateAccount("bob", "bob@example.com", "Bob");
+        var alice = TestDataBuilder.CreateAccount("alice", "Alice");
+        var bob = TestDataBuilder.CreateAccount("bob", "Bob");
         await _store.SaveAsync(new[] { alice, bob });
 
         await _store.SaveAsync(new[] { bob });
@@ -62,6 +68,75 @@ public sealed class JsonAccountStoreTests : IDisposable
 
         var json = await File.ReadAllTextAsync(_filePath);
         json.Should().NotContainEquivalentOf("password");
+    }
+
+    [Fact]
+    public async Task Load_DiscardsOldFormatEntriesWithPlariumLogin()
+    {
+        // Write old format JSON with PlariumLogin
+        var oldFormatJson = """
+        {
+          "accounts": [
+            {
+              "id": "old-account",
+              "plariumLogin": "old@example.com",
+              "displayName": "Old Account",
+              "routine": {
+                "chores": [
+                  { "id": "claim-playtime-rewards", "name": "Claim playtime rewards", "type": 0, "enabled": true, "order": 0 }
+                ]
+              }
+            },
+            {
+              "id": "new-account",
+              "displayName": "New Account",
+              "routine": {
+                "chores": [
+                  { "id": "claim-playtime-rewards", "name": "Claim playtime rewards", "type": 0, "enabled": true, "order": 0 }
+                ]
+              },
+              "lastRunGameDay": 0,
+              "lastOutcome": 0
+            }
+          ]
+        }
+        """;
+
+        await File.WriteAllTextAsync(_filePath, oldFormatJson);
+
+        var loaded = await _store.LoadAsync();
+
+        loaded.Should().HaveCount(1);
+        loaded[0].Id.Should().Be("new-account");
+        loaded[0].DisplayName.Should().Be("New Account");
+    }
+
+    [Fact]
+    public async Task Load_MigratesAccountsWithDefaultValues()
+    {
+        var json = """
+        {
+          "accounts": [
+            {
+              "id": "migrated",
+              "displayName": "Migrated Account",
+              "routine": {
+                "chores": [
+                  { "id": "claim-playtime-rewards", "name": "Claim playtime rewards", "type": 0, "enabled": true, "order": 0 }
+                ]
+              }
+            }
+          ]
+        }
+        """;
+
+        await File.WriteAllTextAsync(_filePath, json);
+
+        var loaded = await _store.LoadAsync();
+
+        loaded.Should().HaveCount(1);
+        loaded[0].LastRunGameDay.Should().Be(0);
+        loaded[0].LastOutcome.Should().Be(RunOutcome.Completed);
     }
 
     [Fact]

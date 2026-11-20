@@ -16,10 +16,13 @@ public sealed record Run(
     string? StatusMessage = null
 )
 {
-    public bool HasFailures => Status == RunStatus.SwitchFailed || Results.Any(r => r.IsFailure);
+    public bool HasFailures => Status is RunStatus.SwitchFailed or RunStatus.InstanceLost || Results.Any(r => r.IsFailure);
 
     /// <summary>The Run stopped before any Chore because the Account switch needs the player to log in by hand.</summary>
     public bool NeedsManualLogin => Status == RunStatus.NeedsManualLogin;
+
+    /// <summary>The Run ended because the Instance was lost mid-run.</summary>
+    public bool IsInstanceLost => Status == RunStatus.InstanceLost;
 
     public bool IsGameBuildMismatch => !TargetedGameBuild.Matches(ActualGameBuild);
 
@@ -44,5 +47,8 @@ public enum RunStatus
     NeedsManualLogin,
 
     /// <summary>The Account switch failed for another reason; no Chore was attempted.</summary>
-    SwitchFailed
+    SwitchFailed,
+
+    /// <summary>The Instance was lost mid-Run (process died or health check failed); Game day not marked done.</summary>
+    InstanceLost
 }

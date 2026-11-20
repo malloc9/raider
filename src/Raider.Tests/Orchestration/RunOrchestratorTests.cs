@@ -20,6 +20,7 @@ public sealed class RunOrchestratorTests
     private readonly Chore _chore1;
     private readonly Chore _chore2;
     private readonly string _logDirectory;
+    private const string InstanceToken = "test-token";
 
     public RunOrchestratorTests()
     {
@@ -46,11 +47,11 @@ public sealed class RunOrchestratorTests
     {
         // Arrange
         _gamePort.SetGameBuild(TestDataBuilder.CreateGameBuild("1.0.0"));
-        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(true));
-        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(InstanceToken, _chore1, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(InstanceToken, _chore2, new ChoreExecutionResult(true));
 
         // Act
-        var run = await _orchestrator.ExecuteRunAsync(_account, _logDirectory);
+        var run = await _orchestrator.ExecuteRunAsync(_account, InstanceToken, _logDirectory);
 
         // Assert
         run.HasFailures.Should().BeFalse();
@@ -70,11 +71,11 @@ public sealed class RunOrchestratorTests
     {
         // Arrange
         _gamePort.SetGameBuild(TestDataBuilder.CreateGameBuild("1.0.0"));
-        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(true));
-        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(false, "Failed to find Gem Mine button"));
+        _gamePort.SetChoreResult(InstanceToken, _chore1, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(InstanceToken, _chore2, new ChoreExecutionResult(false, "Failed to find Gem Mine button"));
 
         // Act
-        var run = await _orchestrator.ExecuteRunAsync(_account, _logDirectory);
+        var run = await _orchestrator.ExecuteRunAsync(_account, InstanceToken, _logDirectory);
 
         // Assert
         run.HasFailures.Should().BeTrue();
@@ -98,11 +99,11 @@ public sealed class RunOrchestratorTests
     {
         // Arrange
         _gamePort.SetGameBuild(TestDataBuilder.CreateGameBuild("1.0.0"));
-        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(false, "Error 1"));
-        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(false, "Error 2"));
+        _gamePort.SetChoreResult(InstanceToken, _chore1, new ChoreExecutionResult(false, "Error 1"));
+        _gamePort.SetChoreResult(InstanceToken, _chore2, new ChoreExecutionResult(false, "Error 2"));
 
         // Act
-        var run = await _orchestrator.ExecuteRunAsync(_account, _logDirectory);
+        var run = await _orchestrator.ExecuteRunAsync(_account, InstanceToken, _logDirectory);
 
         // Assert
         run.HasFailures.Should().BeTrue();
@@ -124,8 +125,8 @@ public sealed class RunOrchestratorTests
         var actualBuild = TestDataBuilder.CreateGameBuild("1.1.0");
         
         _gamePort.SetGameBuild(actualBuild);
-        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(true));
-        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(false, "Method not found: CollectGemMine"));
+        _gamePort.SetChoreResult(InstanceToken, _chore1, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(InstanceToken, _chore2, new ChoreExecutionResult(false, "Method not found: CollectGemMine"));
 
         var orchestrator = TestDataBuilder.CreateOrchestrator(
             _gamePort,
@@ -134,7 +135,7 @@ public sealed class RunOrchestratorTests
             targetedBuild);
 
         // Act
-        var run = await orchestrator.ExecuteRunAsync(_account, _logDirectory);
+        var run = await orchestrator.ExecuteRunAsync(_account, InstanceToken, _logDirectory);
 
         // Assert
         run.IsGameBuildMismatch.Should().BeTrue();
@@ -166,8 +167,8 @@ public sealed class RunOrchestratorTests
         var actualBuild = TestDataBuilder.CreateGameBuild("1.1.0");
         
         _gamePort.SetGameBuild(actualBuild);
-        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(true));
-        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(InstanceToken, _chore1, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(InstanceToken, _chore2, new ChoreExecutionResult(true));
 
         var orchestrator = TestDataBuilder.CreateOrchestrator(
             _gamePort,
@@ -176,7 +177,7 @@ public sealed class RunOrchestratorTests
             targetedBuild);
 
         // Act
-        var run = await orchestrator.ExecuteRunAsync(_account, _logDirectory);
+        var run = await orchestrator.ExecuteRunAsync(_account, InstanceToken, _logDirectory);
 
         // Assert
         run.IsGameBuildMismatch.Should().BeTrue();
@@ -197,12 +198,12 @@ public sealed class RunOrchestratorTests
     {
         // Arrange
         _gamePort.SetGameBuild(TestDataBuilder.CreateGameBuild("1.0.0"));
-        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(false, "Test error"));
-        _gamePort.SetGameStateJson("{\"player\":{\"id\":\"123\",\"level\":50}}");
-        _gamePort.SetPluginLogExcerpt("[ERROR] Failed to click button\n[DEBUG] Retrying...");
+        _gamePort.SetChoreResult(InstanceToken, _chore1, new ChoreExecutionResult(false, "Test error"));
+        _gamePort.SetGameStateJson(InstanceToken, "{\"player\":{\"id\":\"123\",\"level\":50}}");
+        _gamePort.SetPluginLogExcerpt(InstanceToken, "[ERROR] Failed to click button\n[DEBUG] Retrying...");
 
         // Act
-        var run = await _orchestrator.ExecuteRunAsync(_account, _logDirectory);
+        var run = await _orchestrator.ExecuteRunAsync(_account, InstanceToken, _logDirectory);
 
         // Assert
         _snapshotService.SnapshotCount.Should().Be(1);
@@ -224,11 +225,11 @@ public sealed class RunOrchestratorTests
     {
         // Arrange
         _gamePort.SetGameBuild(TestDataBuilder.CreateGameBuild("1.0.0"));
-        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(true));
-        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(false, "Error"));
+        _gamePort.SetChoreResult(InstanceToken, _chore1, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(InstanceToken, _chore2, new ChoreExecutionResult(false, "Error"));
 
         // Act
-        var run = await _orchestrator.ExecuteRunAsync(_account, _logDirectory);
+        var run = await _orchestrator.ExecuteRunAsync(_account, InstanceToken, _logDirectory);
 
         // Assert
         run.SuccessCount.Should().Be(1);
@@ -242,11 +243,11 @@ public sealed class RunOrchestratorTests
     {
         // Arrange
         _gamePort.SetGameBuild(TestDataBuilder.CreateGameBuild("1.0.0"));
-        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(true));
-        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(true, null, 150));
+        _gamePort.SetChoreResult(InstanceToken, _chore1, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(InstanceToken, _chore2, new ChoreExecutionResult(true, null, 150));
 
         // Act
-        var run = await _orchestrator.ExecuteRunAsync(_account, _logDirectory);
+        var run = await _orchestrator.ExecuteRunAsync(_account, InstanceToken, _logDirectory);
 
         // Assert
         run.SuccessCount.Should().Be(2);
@@ -260,16 +261,26 @@ public sealed class RunOrchestratorTests
     {
         // Arrange
         _gamePort.SetGameBuild(TestDataBuilder.CreateGameBuild("1.0.0"));
-        _gamePort.SetChoreResult(_chore1, new ChoreExecutionResult(true));
-        _gamePort.SetChoreResult(_chore2, new ChoreExecutionResult(true, null, 0));
+        _gamePort.SetChoreResult(InstanceToken, _chore1, new ChoreExecutionResult(true));
+        _gamePort.SetChoreResult(InstanceToken, _chore2, new ChoreExecutionResult(true, null, 0));
 
         // Act
-        var run = await _orchestrator.ExecuteRunAsync(_account, _logDirectory);
+        var run = await _orchestrator.ExecuteRunAsync(_account, InstanceToken, _logDirectory);
 
         // Assert
         run.SuccessCount.Should().Be(2);
         var gemMineResult = run.Results.First(r => r.Chore.Type == ChoreType.CollectGemMine);
         gemMineResult.Outcome.Should().Be(ChoreOutcome.Success);
         gemMineResult.GemsCollected.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task Run_InstanceLost_HasCorrectStatus()
+    {
+        var run = await _orchestrator.ExecuteRunWithInstanceLostAsync(_account, InstanceToken, _logDirectory);
+        
+        run.Status.Should().Be(RunStatus.InstanceLost);
+        run.IsInstanceLost.Should().BeTrue();
+        run.HasFailures.Should().BeTrue();
     }
 }

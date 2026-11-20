@@ -9,11 +9,11 @@ using Raider.Core.Ports;
 public sealed class FakeGamePort : IGamePort
 {
     private GameBuild _gameBuild = GameBuild.Unknown;
-    private readonly Dictionary<Chore, ChoreExecutionResult> _choreResults = new();
-    private string _gameStateJson = "{}";
-    private string _pluginLogExcerpt = "";
-    private readonly Dictionary<string, AccountSwitchResult> _switchResults = new(StringComparer.OrdinalIgnoreCase);
-    private string? _currentPlariumLogin;
+    private readonly Dictionary<string, Dictionary<Chore, ChoreExecutionResult>> _choreResults = new();
+    private readonly Dictionary<string, string> _gameStateJson = new();
+    private readonly Dictionary<string, string> _pluginLogExcerpt = new();
+    private readonly Dictionary<string, Dictionary<string, AccountSwitchResult>> _switchResults = new();
+    private readonly Dictionary<string, string?> _currentPlayerId = new();
 
     /// <summary>
     /// Sets the game build to return.
@@ -21,67 +21,85 @@ public sealed class FakeGamePort : IGamePort
     public void SetGameBuild(GameBuild build) => _gameBuild = build;
 
     /// <summary>
-    /// Sets the result for a specific chore.
+    /// Sets the result for a specific chore on a specific instance.
     /// </summary>
-    public void SetChoreResult(Chore chore, ChoreExecutionResult result) => _choreResults[chore] = result;
+    public void SetChoreResult(string instanceToken, Chore chore, ChoreExecutionResult result)
+    {
+        if (!_choreResults.ContainsKey(instanceToken))
+            _choreResults[instanceToken] = new();
+        _choreResults[instanceToken][chore] = result;
+    }
 
     /// <summary>
-    /// Sets the game state JSON to return.
+    /// Sets the game state JSON to return for an instance.
     /// </summary>
-    public void SetGameStateJson(string json) => _gameStateJson = json;
+    public void SetGameStateJson(string instanceToken, string json) => _gameStateJson[instanceToken] = json;
 
     /// <summary>
-    /// Sets the plugin log excerpt to return.
+    /// Sets the plugin log excerpt to return for an instance.
     /// </summary>
-    public void SetPluginLogExcerpt(string excerpt) => _pluginLogExcerpt = excerpt;
+    public void SetPluginLogExcerpt(string instanceToken, string excerpt) => _pluginLogExcerpt[instanceToken] = excerpt;
+
+    /// <summary>
+    /// Sets which player ID the game instance is currently logged into (null = unknown).
+    /// </summary>
+    public void SetCurrentPlayerId(string instanceToken, string? playerId) => _currentPlayerId[instanceToken] = playerId;
+
+    /// <summary>
+    /// Makes switching to <paramref name="playerId"/> on <paramref name="instanceToken"/> end with <paramref name="result"/> instead of succeeding.
+    /// </summary>
+    public void SetSwitchResult(string instanceToken, string playerId, AccountSwitchResult result)
+    {
+        if (!_switchResults.ContainsKey(instanceToken))
+            _switchResults[instanceToken] = new(StringComparer.OrdinalIgnoreCase);
+        _switchResults[instanceToken][playerId] = result;
+    }
+
+    /// <summary>
+    /// Player IDs switched to, in order, per instance.
+    /// </summary>
+    public Dictionary<string, List<string>> SwitchedTo { get; } = new();
+
+    /// <summary>
+    /// Every call in order: "switch:<instanceToken>:<playerId>" or "chore:<instanceToken>:<playerId>:<chore id>".
+    /// </summary>
+    public List<string> CallLog { get; } = new();
 
     public Task<GameBuild> GetGameBuildAsync(CancellationToken cancellationToken = default)
         => Task.FromResult(_gameBuild);
 
-    /// <summary>
-    /// Sets which Plarium login the game is currently logged into (null = unknown).
-    /// </summary>
-    public void SetCurrentPlariumLogin(string? plariumLogin) => _currentPlariumLogin = plariumLogin;
-
-    /// <summary>
-    /// Makes switching to <paramref name="plariumLogin"/> end with <paramref name="result"/> instead of succeeding.
-    /// </summary>
-    public void SetSwitchResult(string plariumLogin, AccountSwitchResult result) => _switchResults[plariumLogin] = result;
-
-    /// <summary>
-    /// Plarium logins switched to, in order.
-    /// </summary>
-    public List<string> SwitchedTo { get; } = new();
-
-    /// <summary>
-    /// Every call in order: "switch:&lt;login&gt;" or "chore:&lt;login&gt;:&lt;chore id&gt;".
-    /// </summary>
-    public List<string> CallLog { get; } = new();
-
-    public Task<string?> GetCurrentPlariumLoginAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult(_currentPlariumLogin);
-
-    public Task<AccountSwitchResult> SwitchAccountAsync(Account account, CancellationToken cancellationToken = default)
+    public Task<string?> GetCurrentPlayerIdAsync(CancellationToken cancellationToken = default)
     {
-        SwitchedTo.Add(account.PlariumLogin);
-        CallLog.Add($"switch:{account.PlariumLogin}");
+        // Return the first instance's player ID for backward compatibility
+        return Task.FromResult(_currentPlayerId.Values.FirstOrDefault());
+    }
 
-        if (_switchResults.TryGetValue(account.PlariumLogin, out var result) && result.Outcome != AccountSwitchOutcome.Switched)
+    public Task<AccountSwitchResult> SwitchAccountAsync(string instanceToken, Account account, CancellationToken cancellationToken = default)
+    {
+        if (!SwitchedTo.ContainsKey(instanceToken))
+            SwitchedTo[instanceToken] = new();
+        SwitchedTo[instanceToken].Add(account.Id);
+        CallLog.Add($"switch:{instanceToken}:{account.Id}");
+
+        if (_switchResults.TryGetValue(instanceToken, out var instanceSwitches) &&
+            instanceSwitches.TryGetValue(account.Id, out var result) &&
+            result.Outcome != AccountSwitchOutcome.Switched)
         {
-            // Like the real launcher: after a failed switch, which Account is active is unknown
-            _currentPlariumLogin = null;
+            _currentPlayerId[instanceToken] = null;
             return Task.FromResult(result);
         }
 
-        _currentPlariumLogin = account.PlariumLogin;
+        _currentPlayerId[instanceToken] = account.Id;
         return Task.FromResult(AccountSwitchResult.Switched());
     }
 
-    public Task<ChoreExecutionResult> ExecuteChoreAsync(Chore chore, CancellationToken cancellationToken = default)
+    public Task<ChoreExecutionResult> ExecuteChoreAsync(string instanceToken, Chore chore, CancellationToken cancellationToken = default)
     {
-        CallLog.Add($"chore:{_currentPlariumLogin}:{chore.Id}");
+        var currentPlayerId = _currentPlayerId.GetValueOrDefault(instanceToken);
+        CallLog.Add($"chore:{instanceToken}:{currentPlayerId}:{chore.Id}");
 
-        if (_choreResults.TryGetValue(chore, out var result))
+        if (_choreResults.TryGetValue(instanceToken, out var instanceChores) &&
+            instanceChores.TryGetValue(chore, out var result))
         {
             return Task.FromResult(result);
         }
@@ -90,9 +108,9 @@ public sealed class FakeGamePort : IGamePort
         return Task.FromResult(new ChoreExecutionResult(true, null, 0, null));
     }
 
-    public Task<string> GetGameStateJsonAsync(CancellationToken cancellationToken = default)
-        => Task.FromResult(_gameStateJson);
+    public Task<string> GetGameStateJsonAsync(string instanceToken, CancellationToken cancellationToken = default)
+        => Task.FromResult(_gameStateJson.GetValueOrDefault(instanceToken, "{}"));
 
-    public Task<string> GetPluginLogExcerptAsync(int maxLines, CancellationToken cancellationToken = default)
-        => Task.FromResult(_pluginLogExcerpt);
+    public Task<string> GetPluginLogExcerptAsync(string instanceToken, int maxLines, CancellationToken cancellationToken = default)
+        => Task.FromResult(_pluginLogExcerpt.GetValueOrDefault(instanceToken, ""));
 }

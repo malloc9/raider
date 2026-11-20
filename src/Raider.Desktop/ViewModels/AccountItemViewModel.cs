@@ -15,12 +15,11 @@ public sealed partial class AccountItemViewModel : ObservableObject
     {
         _routineChanged = routineChanged;
         Id = account.Id;
-        PlariumLogin = account.PlariumLogin;
         DisplayName = account.DisplayName;
 
         // Show every Chore; the ones in the Account's Routine are ticked, in Routine order first
         var enabled = account.Routine.Chores;
-        var others = Routine.Default().Chores.Where(c => enabled.All(e => e.Type != c.Type));
+        var others = Routine.Default().Chores.Where(c => enabled.All(e => e.Id != c.Id));
         Chores = new ObservableCollection<ChoreToggleViewModel>(
             enabled.Select(c => new ChoreToggleViewModel(c, true, OnChoreToggled))
                 .Concat(others.Select(c => new ChoreToggleViewModel(c, false, OnChoreToggled))));
@@ -29,8 +28,6 @@ public sealed partial class AccountItemViewModel : ObservableObject
     }
 
     public string Id { get; }
-
-    public string PlariumLogin { get; }
 
     public string DisplayName { get; }
 
@@ -42,11 +39,21 @@ public sealed partial class AccountItemViewModel : ObservableObject
     [ObservableProperty]
     private bool _needsManualLogin;
 
+    private int _lastRunGameDay;
+    private RunOutcome _lastOutcome = RunOutcome.Completed;
+
     public Account ToAccount() => new(
         Id,
-        PlariumLogin,
         DisplayName,
-        new Routine(Chores.Where(c => c.IsEnabled).Select(c => c.Chore).ToList()));
+        new Routine(Chores.Where(c => c.IsEnabled).Select(c => c.Chore).ToList()),
+        LastRunGameDay: _lastRunGameDay,
+        LastOutcome: _lastOutcome);
+
+    internal void Initialize(Account account)
+    {
+        _lastRunGameDay = account.LastRunGameDay;
+        _lastOutcome = account.LastOutcome;
+    }
 
     private void OnChoreToggled() => _routineChanged();
 }

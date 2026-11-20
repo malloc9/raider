@@ -33,11 +33,11 @@ public sealed class PlariumPlayAccountSwitcher : IAccountSwitcher
         _logger = logger;
     }
 
-    public Task<AccountSwitchResult> SwitchToAsync(string plariumLogin, CancellationToken cancellationToken = default)
+    public Task<AccountSwitchResult> SwitchToAsync(SwitchAccountRequest request, CancellationToken cancellationToken = default)
         // UI Automation calls are blocking COM calls; keep them off the UI thread
-        => Task.Run(() => SwitchTo(plariumLogin, cancellationToken), cancellationToken);
+        => Task.Run(() => SwitchTo(request, cancellationToken), cancellationToken);
 
-    private AccountSwitchResult SwitchTo(string plariumLogin, CancellationToken cancellationToken)
+    private AccountSwitchResult SwitchTo(SwitchAccountRequest request, CancellationToken cancellationToken)
     {
         var window = FindLauncherWindow();
         if (window == null)
@@ -48,27 +48,27 @@ public sealed class PlariumPlayAccountSwitcher : IAccountSwitcher
         try
         {
             // 1. Open the account menu and its "Switch account" list, unless the login is already listed
-            var loginEntry = FindByName(window, plariumLogin);
+            var loginEntry = FindByName(window, request.PlariumLogin);
             if (loginEntry == null)
             {
                 Invoke(WaitFor(window, AccountMenuNames, cancellationToken));
                 Invoke(WaitFor(window, SwitchAccountNames, cancellationToken));
-                loginEntry = WaitFor(window, new[] { plariumLogin }, cancellationToken);
+                loginEntry = WaitFor(window, new[] { request.PlariumLogin }, cancellationToken);
             }
 
             if (loginEntry == null)
             {
-                return AccountSwitchResult.Failed($"Plarium Play does not remember the login {plariumLogin}; log in to it once by hand");
+                return AccountSwitchResult.Failed($"Plarium Play does not remember the login {request.PlariumLogin}; log in to it once by hand");
             }
 
             // 2. Pick the remembered login
-            _logger.LogInformation("Selecting remembered login {Login} in Plarium Play", plariumLogin);
+            _logger.LogInformation("Selecting remembered login {Login} for instance {InstanceToken} in Plarium Play", request.PlariumLogin, request.InstanceToken);
             Invoke(loginEntry);
 
             // 3. An expired remembered login makes Plarium Play ask for the password: stop there
             if (WaitForPasswordPrompt(window, cancellationToken))
             {
-                _logger.LogWarning("Plarium Play asks for the password of {Login}", plariumLogin);
+                _logger.LogWarning("Plarium Play asks for the password of {Login}", request.PlariumLogin);
                 return AccountSwitchResult.PasswordRequired();
             }
 

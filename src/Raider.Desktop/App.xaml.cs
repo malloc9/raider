@@ -32,6 +32,16 @@ public partial class App : Application
                 services.AddSingleton<INotificationService, WindowsNotificationService>();
                 services.AddSingleton<IAccountStore>(_ => new JsonAccountStore());
                 services.AddSingleton<ISnapshotService, SnapshotService>();
+                services.AddSingleton<IInstanceRegistry>(sp => 
+                {
+                    var healthClient = sp.GetRequiredService<IPluginHealthClient>();
+                    return new InstanceRegistry(healthClient);
+                });
+                services.AddSingleton<RunCoordinator>(sp => new RunCoordinator(
+                    sp.GetRequiredService<IInstanceRegistry>(),
+                    sp.GetRequiredService<IAccountStore>(),
+                    sp.GetRequiredService<RunOrchestrator>(),
+                    sp.GetRequiredService<ILogger<RunCoordinator>>()));
                 // No target game build pinned yet (Unknown): failures count as plain failures, not "broken by game update"
                 services.AddSingleton(sp => new RunOrchestrator(
                     sp.GetRequiredService<IGamePort>(),
@@ -63,11 +73,22 @@ public partial class App : Application
         var mainWindow = _host.Services.GetRequiredService<MainWindow>();
         mainWindow.Show();
         
+        // Start the RunCoordinator
+        var coordinator = _host.Services.GetRequiredService<RunCoordinator>();
+        coordinator.Start();
+        
         base.OnStartup(e);
     }
 
     protected override async void OnExit(ExitEventArgs e)
     {
+        var coordinator = _host.Services.GetRequiredService<RunCoordinator>();
+        coordinator.Stop();
+        coordinator.Dispose();
+        
+        var registry = _host.Services.GetRequiredService<IInstanceRegistry>();
+        await registry.DisposeAsync();
+        
         await _host!.StopAsync();
         _host.Dispose();
         base.OnExit(e);

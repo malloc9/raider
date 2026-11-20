@@ -1,8 +1,8 @@
 namespace Raider.Desktop.ViewModels;
 
 using CommunityToolkit.Mvvm.ComponentModel;
-using Microsoft.Extensions.Logging;
 using CommunityToolkit.Mvvm.Input;
+using Microsoft.Extensions.Logging;
 using Raider.Core.Models;
 using Raider.Core.Services;
 using Raider.Core.Ports;
@@ -21,7 +21,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
     private readonly IPluginHealthClient _pluginHealthClient;
     private readonly IGamePort _gamePort;
     private readonly IAccountStore _accountStore;
-    private readonly RunOrchestrator _runOrchestrator;
+    private readonly RunCoordinator _runCoordinator;
+    private readonly IInstanceRegistry _instanceRegistry;
     private readonly ILogger<MainWindowViewModel> _logger;
 
     private GameInstallation? _gameInstallation;
@@ -35,7 +36,8 @@ public sealed partial class MainWindowViewModel : ObservableObject
         IPluginHealthClient pluginHealthClient,
         IGamePort gamePort,
         IAccountStore accountStore,
-        RunOrchestrator runOrchestrator,
+        RunCoordinator runCoordinator,
+        IInstanceRegistry instanceRegistry,
         ILogger<MainWindowViewModel> logger)
     {
         _gameDetectionService = gameDetectionService;
@@ -43,10 +45,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
         _pluginHealthClient = pluginHealthClient;
         _gamePort = gamePort;
         _accountStore = accountStore;
-        _runOrchestrator = runOrchestrator;
+        _runCoordinator = runCoordinator;
+        _instanceRegistry = instanceRegistry;
         _logger = logger;
         Accounts = new ObservableCollection<AccountItemViewModel>();
-        _newPlariumLogin = string.Empty;
         _newDisplayName = string.Empty;
 
         PluginStatus = PluginInstallState.NotInstalled;
@@ -273,12 +275,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
     /// <summary>The player's Accounts, each with its own Routine.</summary>
     public ObservableCollection<AccountItemViewModel> Accounts { get; }
 
-    /// <summary>Plarium login (email/username) of the Account to add. Never a password.</summary>
+    /// <summary>Display name of the Account to add.</summary>
     [ObservableProperty]
     [NotifyCanExecuteChangedFor(nameof(AddAccountCommand))]
-    private string _newPlariumLogin;
-
-    [ObservableProperty]
     private string _newDisplayName;
 
     [ObservableProperty]
@@ -293,7 +292,9 @@ public sealed partial class MainWindowViewModel : ObservableObject
             Accounts.Clear();
             foreach (var account in accounts)
             {
-                Accounts.Add(new AccountItemViewModel(account, SaveAccountsInBackground));
+                var vm = new AccountItemViewModel(account, SaveAccountsInBackground);
+                vm.Initialize(account);
+                Accounts.Add(vm);
             }
             AddLog($"Loaded {accounts.Count} account(s)");
         }
@@ -304,26 +305,24 @@ public sealed partial class MainWindowViewModel : ObservableObject
         }
     }
 
-    private bool CanAddAccount() => !string.IsNullOrWhiteSpace(NewPlariumLogin);
+    private bool CanAddAccount() => !string.IsNullOrWhiteSpace(NewDisplayName);
 
     [RelayCommand(CanExecute = nameof(CanAddAccount))]
     private async Task AddAccountAsync()
     {
-        var login = NewPlariumLogin.Trim();
-        if (Accounts.Any(a => string.Equals(a.PlariumLogin, login, StringComparison.OrdinalIgnoreCase)))
+        var displayName = NewDisplayName.Trim();
+        if (Accounts.Any(a => string.Equals(a.DisplayName, displayName, StringComparison.OrdinalIgnoreCase)))
         {
-            StatusMessage = $"Account {login} is already added";
+            StatusMessage = $"Account {displayName} is already added";
             return;
         }
 
-        var displayName = string.IsNullOrWhiteSpace(NewDisplayName) ? login : NewDisplayName.Trim();
-        var account = new Account(Guid.NewGuid().ToString("N")[..12], login, displayName, Routine.Default());
+        var account = new Account(Guid.NewGuid().ToString("N")[..12], displayName, Routine.Default());
         Accounts.Add(new AccountItemViewModel(account, SaveAccountsInBackground));
-        NewPlariumLogin = string.Empty;
         NewDisplayName = string.Empty;
 
         await SaveAccountsAsync();
-        AddLog($"Added account {displayName} ({login})");
+        AddLog($"Added account {displayName}");
     }
 
     [RelayCommand]
@@ -339,14 +338,17 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
     private bool CanRun(AccountItemViewModel? item) => !IsRunning;
 
-    [RelayCommand(CanExecute = nameof(CanRun))]
-    private Task RunAccountAsync(AccountItemViewModel? item)
-        => item == null ? Task.CompletedTask : RunAccountsAsync(new[] { item });
+    [RelayCommand(CanExecute = nameOf(CanRun))]
+    private async Task RunAccountAsync(AccountItemViewModel? item)
+    {
+        if (item == null) return;
+        await RunAccountsAsync(new[] { item });
+    }
 
     private bool CanRunAll() => !IsRunning;
 
     [RelayCommand(CanExecute = nameof(CanRunAll))]
-    private Task RunAllAccountsAsync() => RunAccountsAsync(Accounts.ToList());
+    private async Task RunAllAccountsAsync() => await RunAccountsAsync(Accounts.ToList());
 
     private async Task RunAccountsAsync(IReadOnlyList<AccountItemViewModel> items)
     {
@@ -360,15 +362,23 @@ public sealed partial class MainWindowViewModel : ObservableObject
 
         try
         {
-            // One at a time in the single game instance, switching Accounts between Runs
+            // Manual runs through RunCoordinator (bypass game-day gating)
             foreach (var item in items)
             {
                 item.Status = "Running...";
                 item.NeedsManualLogin = false;
                 AddLog($"Run started for {item.DisplayName}");
 
-                var run = await _runOrchestrator.ExecuteRunAsync(item.ToAccount(), Path.Combine(logDirectory, item.Id));
-                ReportRun(item, run);
+                var run = await _runCoordinator.RunManualAsync(item.ToAccount().Id);
+                if (run != null)
+                {
+                    ReportRun(item, run);
+                }
+                else
+                {
+                    item.Status = "No instance found for this account";
+                    AddLog($"{item.DisplayName}: No game instance found");
+                }
             }
         }
         catch (Exception ex)
@@ -396,6 +406,10 @@ public sealed partial class MainWindowViewModel : ObservableObject
             case RunStatus.SwitchFailed:
                 item.Status = $"Account switch failed: {run.StatusMessage}";
                 AddLog($"{item.DisplayName}: account switch failed: {run.StatusMessage}");
+                break;
+            case RunStatus.InstanceLost:
+                item.Status = "Instance lost mid-run";
+                AddLog($"{item.DisplayName}: instance lost mid-run, game day not marked done");
                 break;
             default:
                 item.Status = $"Done: {run.SuccessCount} ok, {run.FailureCount} failed";

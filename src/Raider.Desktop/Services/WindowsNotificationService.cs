@@ -34,7 +34,7 @@ public sealed class WindowsNotificationService : INotificationService
     {
         await ShowToastAsync(
             "Raider: log in by hand",
-            $"Account {account.DisplayName} ({account.PlariumLogin}) needs its password. Log in to it in Plarium Play, then run it again.",
+            $"Account {account.DisplayName} (ID: {account.Id}) needs its password. Log in to it in Plarium Play, then run it again.",
             cancellationToken);
     }
 

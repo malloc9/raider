@@ -3,7 +3,8 @@ namespace Raider.Core.Ports;
 using Raider.Core.Models;
 
 /// <summary>
-/// Port for interacting with the game process.
+/// Port for interacting with a specific game instance.
+/// Each instance has its own token for communication.
 /// </summary>
 public interface IGamePort
 {
@@ -13,30 +14,30 @@ public interface IGamePort
     Task<GameBuild> GetGameBuildAsync(CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Gets the Plarium login the running game is logged into, or null when unknown.
+    /// Gets the player ID the running game is logged into, or null when unknown.
     /// </summary>
-    Task<string?> GetCurrentPlariumLoginAsync(CancellationToken cancellationToken = default);
+    Task<string?> GetCurrentPlayerIdAsync(CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Performs an Account switch to the specified Account, using logins Plarium Play already remembers.
+    /// Performs an Account switch to the specified Account using the instance's token.
     /// Never asks for or handles a password: if one is needed, returns <see cref="AccountSwitchOutcome.PasswordRequired"/>.
     /// </summary>
-    Task<AccountSwitchResult> SwitchAccountAsync(Account account, CancellationToken cancellationToken = default);
+    Task<AccountSwitchResult> SwitchAccountAsync(string instanceToken, Account account, CancellationToken cancellationToken = default);
     
     /// <summary>
-    /// Executes a chore.
+    /// Executes a chore on the instance.
     /// </summary>
-    Task<ChoreExecutionResult> ExecuteChoreAsync(Chore chore, CancellationToken cancellationToken = default);
+    Task<ChoreExecutionResult> ExecuteChoreAsync(string instanceToken, Chore chore, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Gets the current game state as JSON.
     /// </summary>
-    Task<string> GetGameStateJsonAsync(CancellationToken cancellationToken = default);
+    Task<string> GetGameStateJsonAsync(string instanceToken, CancellationToken cancellationToken = default);
     
     /// <summary>
     /// Gets recent plugin log excerpt.
     /// </summary>
-    Task<string> GetPluginLogExcerptAsync(int maxLines, CancellationToken cancellationToken = default);
+    Task<string> GetPluginLogExcerptAsync(string instanceToken, int maxLines, CancellationToken cancellationToken = default);
 }
 
 /// <summary>

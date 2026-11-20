@@ -15,13 +15,23 @@ public static class TestDataBuilder
 
     public static Account CreateAccount(
         string id = "account-1",
-        string plariumLogin = "test@example.com",
         string displayName = "Test Account",
-        Routine? routine = null)
-        => new(id, plariumLogin, displayName, routine ?? CreateRoutine());
+        Routine? routine = null,
+        int lastRunGameDay = 0,
+        RunOutcome lastOutcome = RunOutcome.Completed)
+        => new(id, displayName, routine ?? CreateRoutine(), lastRunGameDay, lastOutcome);
 
     public static GameBuild CreateGameBuild(string version = "1.0.0")
         => new(version, DateTimeOffset.UtcNow);
+
+    public static Instance CreateInstance(
+        string id = "instance-1",
+        string token = "token-1",
+        int processId = 1234,
+        string? playerId = "player-1",
+        string? playerName = "Test Player",
+        InstanceStatus status = InstanceStatus.Ready)
+        => new(id, token, processId, playerId, playerName, DateTimeOffset.UtcNow, status);
 
     public static RunOrchestrator CreateOrchestrator(
         FakeGamePort gamePort,
