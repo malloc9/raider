@@ -21,6 +21,7 @@ public sealed record InstanceRegistration(int Pid, int Port, DateTimeOffset Proc
         "instances");
 
     /// <summary>The plugin's HTTP base address.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
     public Uri BaseUrl => new($"http://localhost:{Port}/raider/");
 
     public static string FilePath(string directory, int pid) => Path.Combine(directory, $"{pid}.json");

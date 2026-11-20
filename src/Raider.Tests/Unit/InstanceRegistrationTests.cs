@@ -22,6 +22,7 @@ public sealed class InstanceRegistrationTests : IDisposable
         var json = new InstanceRegistration(1234, 50123, DateTimeOffset.Parse("2026-11-20T08:00:00Z")).ToJson();
 
         json.Should().Contain("\"pid\": 1234").And.Contain("\"port\": 50123").And.Contain("\"processStart\"");
+        json.Should().NotContain("baseUrl");
     }
 
     [Fact]
