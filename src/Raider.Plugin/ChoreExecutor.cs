@@ -24,13 +24,11 @@ internal sealed class ChoreExecutor
         _choreHandlers = new Dictionary<string, IChoreHandler>(StringComparer.OrdinalIgnoreCase)
         {
             { "ClaimPlaytimeRewards", new ClaimPlaytimeRewardsChoreHandler() },
-            { "ClanCheckIn", new ClanCheckInChoreHandler() },
+            { "ClaimQuests", new ClaimQuestsChoreHandler() },
             { "CollectInbox", new CollectInboxChoreHandler() },
             { "BuyFreeMarketItems", new BuyFreeMarketItemsChoreHandler() },
             { "CollectGemMine", new CollectGemMineChoreHandler() },
-            { "ClaimPlaytimeRewards", new ClaimPlaytimeRewardsChoreHandler() },
-            { "ClaimQuests", new ClaimQuestsChoreHandler() },
-            // Other chore handlers will be added here
+            { "ClanCheckIn", new ClanCheckInChoreHandler() }
         };
     }
 
@@ -104,6 +102,9 @@ internal sealed class ChoreExecutor
         {
             switch (request.HttpMethod)
             {
+                case "GET" when request.Url?.AbsolutePath == "/raider/health":
+                    await WriteResponseAsync(response, 200, new { status = "ok" });
+                    break;
                 case "GET" when request.Url?.AbsolutePath == "/raider/game-build":
                     await HandleGetGameBuildAsync(response);
                     break;
@@ -112,6 +113,9 @@ internal sealed class ChoreExecutor
                     break;
                 case "GET" when request.Url?.AbsolutePath?.StartsWith("/raider/plugin-log") == true:
                     await HandleGetPluginLogAsync(request, response);
+                    break;
+                case "GET" when request.Url?.AbsolutePath == "/raider/plugin-version":
+                    await HandleGetPluginVersionAsync(response);
                     break;
                 case "POST" when request.Url?.AbsolutePath == "/raider/execute-chore":
                     await HandleExecuteChoreAsync(request, response);
@@ -133,20 +137,25 @@ internal sealed class ChoreExecutor
 
     private async Task HandleGetGameBuildAsync(HttpListenerResponse response)
     {
-        var gameBuild = GameAccess.GetGameBuild();
-        await WriteResponseAsync(response, 200, new { gameBuild });
+        // Key is "version" to match PluginGamePort.GameBuildResponse
+        await WriteResponseAsync(response, 200, new { version = GameAccess.GetGameBuild() });
     }
 
     private async Task HandleGetGameStateAsync(HttpListenerResponse response)
     {
-        // Return basic game state as JSON
+        // PluginGamePort reads the response body as the raw game-state JSON
         var state = new
         {
             isInGame = GameAccess.IsInGame(),
             gameBuild = GameAccess.GetGameBuild(),
             timestamp = DateTimeOffset.UtcNow.ToString("O")
         };
-        await WriteResponseAsync(response, 200, new { state = JsonSerializer.Serialize(state, JsonOptions.Default) });
+        await WriteResponseAsync(response, 200, state);
+    }
+
+    private async Task HandleGetPluginVersionAsync(HttpListenerResponse response)
+    {
+        await WriteResponseAsync(response, 200, new { version = PluginInfo.PLUGIN_VERSION });
     }
 
     private async Task HandleGetPluginLogAsync(HttpListenerRequest request, HttpListenerResponse response)

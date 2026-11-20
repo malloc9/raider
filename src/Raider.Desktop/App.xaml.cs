@@ -26,7 +26,7 @@ public partial class App : Application
                 services.AddSingleton<IGameDetectionService, GameDetectionService>();
                 services.AddSingleton<IPluginInstallerService, PluginInstallerService>();
                 services.AddSingleton<IPluginHealthClient, PluginHealthClient>();
-                services.AddSingleton<IGamePort, GamePort>();
+                services.AddSingleton<IGamePort>(_ => new PluginGamePort());
                 services.AddSingleton<INotificationService, WindowsNotificationService>();
                 
                 // ViewModels

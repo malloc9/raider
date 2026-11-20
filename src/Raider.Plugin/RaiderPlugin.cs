@@ -7,7 +7,6 @@ using BepInEx;
 using BepInEx.Configuration;
 using BepInEx.Logging;
 using HarmonyLib;
-using Raider.Plugin.Chores;
 using Raider.Plugin.Game;
 using Raider.Plugin.Ipc;
 
@@ -37,9 +36,6 @@ public sealed class RaiderPlugin : BaseUnityPlugin
 
         // Initialize game access
         GameAccess.Initialize(Log);
-        
-        // Initialize chore handlers
-        GemMineChore.Initialize(Log, _harmony);
         
         // Start chore executor (for desktop app IPC)
         ChoreExecutor = new ChoreExecutor();

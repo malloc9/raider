@@ -14,7 +14,7 @@ public sealed class PluginGamePort : IGamePort
     private readonly string _pluginBaseUrl;
     private readonly JsonSerializerOptions _jsonOptions;
 
-    public PluginGamePort(string pluginBaseUrl = "http://localhost:51837/raider/")
+    public PluginGamePort(string pluginBaseUrl = "http://localhost:51838/raider/")
     {
         _pluginBaseUrl = pluginBaseUrl.TrimEnd('/') + "/";
         _httpClient = new HttpClient
@@ -31,9 +31,24 @@ public sealed class PluginGamePort : IGamePort
     /// <inheritdoc />
     public async Task<GameBuild> GetGameBuildAsync(CancellationToken cancellationToken = default)
     {
-        // The plugin doesn't expose game build directly; we'd get this from the game process
-        // For now, return unknown - the desktop app can get this separately
-        return await Task.FromResult(GameBuild.Unknown);
+        try
+        {
+            var response = await _httpClient.GetAsync("game-build", cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<GameBuildResponse>(_jsonOptions, cancellationToken);
+                if (result != null && !string.IsNullOrEmpty(result.Version))
+                {
+                    return new GameBuild(result.Version, DateTimeOffset.UtcNow);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            // Log error but don't throw - return unknown
+        }
+        
+        return GameBuild.Unknown;
     }
 
     /// <inheritdoc />
@@ -99,15 +114,38 @@ public sealed class PluginGamePort : IGamePort
     /// <inheritdoc />
     public async Task<string> GetGameStateJsonAsync(CancellationToken cancellationToken = default)
     {
-        // Could be implemented via a plugin endpoint
-        return await Task.FromResult("{}");
+        try
+        {
+            var response = await _httpClient.GetAsync("game-state", cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                return await response.Content.ReadAsStringAsync(cancellationToken);
+            }
+        }
+        catch
+        {
+            // Ignore errors
+        }
+        return "{}";
     }
 
     /// <inheritdoc />
     public async Task<string> GetPluginLogExcerptAsync(int maxLines, CancellationToken cancellationToken = default)
     {
-        // Could be implemented via a plugin endpoint
-        return await Task.FromResult($"[Plugin] Log excerpt requested ({maxLines} lines)");
+        try
+        {
+            var response = await _httpClient.GetAsync($"plugin-log?maxLines={maxLines}", cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<PluginLogResponse>(_jsonOptions, cancellationToken);
+                return result?.Log ?? "";
+            }
+        }
+        catch
+        {
+            // Ignore errors
+        }
+        return "";
     }
 
     /// <summary>
@@ -127,6 +165,27 @@ public sealed class PluginGamePort : IGamePort
     }
 
     /// <summary>
+    /// Gets the plugin version.
+    /// </summary>
+    public async Task<string> GetPluginVersionAsync(CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var response = await _httpClient.GetAsync("plugin-version", cancellationToken);
+            if (response.IsSuccessStatusCode)
+            {
+                var result = await response.Content.ReadFromJsonAsync<PluginVersionResponse>(_jsonOptions, cancellationToken);
+                return result?.Version ?? "unknown";
+            }
+        }
+        catch
+        {
+            // Ignore errors
+        }
+        return "unknown";
+    }
+
+    /// <summary>
     /// Request sent to the plugin to execute a chore.
     /// </summary>
     private sealed class PluginChoreRequest
@@ -143,5 +202,20 @@ public sealed class PluginGamePort : IGamePort
         public bool Success { get; set; }
         public string? ErrorMessage { get; set; }
         public object? Data { get; set; }
+    }
+
+    private sealed class GameBuildResponse
+    {
+        public string Version { get; set; } = string.Empty;
+    }
+
+    private sealed class PluginLogResponse
+    {
+        public string Log { get; set; } = string.Empty;
+    }
+
+    private sealed class PluginVersionResponse
+    {
+        public string Version { get; set; } = string.Empty;
     }
 }
