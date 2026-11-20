@@ -52,3 +52,23 @@ public sealed class BooleanToVisibilityConverter : IValueConverter
         return false;
     }
 }
+
+/// <summary>
+/// Converts DateTimeOffset to local time string.
+/// </summary>
+public sealed class DateTimeOffsetToStringConverter : IValueConverter
+{
+    public object Convert(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        if (value is DateTimeOffset dto)
+        {
+            return dto.ToLocalTime().ToString("HH:mm:ss");
+        }
+        return "Never";
+    }
+
+    public object ConvertBack(object value, Type targetType, object parameter, CultureInfo culture)
+    {
+        return DependencyProperty.UnsetValue;
+    }
+}

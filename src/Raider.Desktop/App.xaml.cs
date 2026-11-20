@@ -5,7 +5,6 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Raider.Core.Models;
 using Raider.Core.Services;
-using Raider.Core.Ports;
 using Raider.Desktop.Services;
 using Raider.Desktop.ViewModels;
 using Raider.Desktop.Views;
@@ -32,6 +31,7 @@ public partial class App : Application
                 services.AddSingleton<INotificationService, WindowsNotificationService>();
                 services.AddSingleton<IAccountStore>(_ => new JsonAccountStore());
                 services.AddSingleton<ISnapshotService, SnapshotService>();
+                services.AddSingleton<IInstanceDetectionService, InstanceDetectionService>();
                 // No target game build pinned yet (Unknown): failures count as plain failures, not "broken by game update"
                 services.AddSingleton(sp => new RunOrchestrator(
                     sp.GetRequiredService<IGamePort>(),
@@ -41,10 +41,10 @@ public partial class App : Application
                     sp.GetRequiredService<ILogger<RunOrchestrator>>()));
                 
                 // ViewModels
-                services.AddSingleton<MainWindowViewModel>();
+                services.AddSingleton<InstancesAndAccountsViewModel>();
                 
                 // Views
-                services.AddSingleton<MainWindow>();
+                services.AddSingleton<InstancesAndAccountsWindow>();
                 
                 // Logging
                 services.AddLogging(builder =>
@@ -60,8 +60,12 @@ public partial class App : Application
     {
         await _host!.StartAsync();
         
-        var mainWindow = _host.Services.GetRequiredService<MainWindow>();
-        mainWindow.Show();
+        var window = _host.Services.GetRequiredService<InstancesAndAccountsWindow>();
+        var viewModel = _host.Services.GetRequiredService<InstancesAndAccountsViewModel>();
+        window.DataContext = viewModel;
+        window.Show();
+        
+        await viewModel.InitializeAsync();
         
         base.OnStartup(e);
     }

@@ -13,6 +13,7 @@
             <!-- Converters -->
             <local:InverseBooleanConverter x:Key="InverseBooleanConverter" />
             <local:BooleanToVisibilityConverter x:Key="BooleanToVisibilityConverter" />
+            <local:DateTimeOffsetToStringConverter x:Key="DateTimeOffsetToStringConverter" />
             
             <!-- Global styles -->
             <Style TargetType="TextBlock">
