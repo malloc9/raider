@@ -35,8 +35,9 @@ internal sealed class ClaimQuestsChoreHandler : IChoreHandler
     private static ChorePlan Plan(object userWrapper)
     {
         var commands = new List<PlannedCommand>();
-        // Periodic quests and QuestStates are separate ID spaces with separate commands; dedupe within each only
-        var planned = new HashSet<(string Kind, int QuestId)>();
+        // One ID space: a Daily/Weekly/Monthly quest also shows up as a QuestState in the Periodic category with the
+        // same ID (seen live on 11.95), so it is claimed once, through the periodic command found first
+        var planned = new HashSet<int>();
 
         var periodicData = Get(GetRequired(userWrapper, "PeriodicQuests"), "PeriodicData");
         foreach (var group in Items(periodicData == null ? null : Get(periodicData, "Groups")))
@@ -50,7 +51,7 @@ internal sealed class ClaimQuestsChoreHandler : IChoreHandler
                 }
 
                 var questId = Convert.ToInt32(Get(quest, "QuestId"));
-                if (planned.Add(("Periodic", questId)))
+                if (planned.Add(questId))
                 {
                     commands.Add(new PlannedCommand(ClaimPeriodic, new object?[] { questId }, new { questId, tab, kind = "Periodic" }));
                 }
@@ -74,7 +75,7 @@ internal sealed class ClaimQuestsChoreHandler : IChoreHandler
                 continue;
             }
 
-            if (planned.Add(("Quest", questId)))
+            if (planned.Add(questId))
             {
                 commands.Add(new PlannedCommand(ClaimQuest, new object?[] { questId }, new { questId, tab = category, kind = "Quest" }));
             }
