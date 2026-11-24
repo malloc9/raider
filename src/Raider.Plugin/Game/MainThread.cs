@@ -46,6 +46,10 @@ internal static class MainThread
     /// <summary>
     /// Runs <paramref name="work"/> on the main thread and returns its result. Fails if the game does not get to
     /// it within <paramref name="timeout"/> (the game's frame loop is not running).
+    /// <para>
+    /// Work that timed out never runs: the main thread skips it if it gets to it later, so a caller told "did not
+    /// start" can trust that nothing happened in the game. Work the main thread already started is waited for.
+    /// </para>
     /// </summary>
     public static async Task<T> RunAsync<T>(Func<T> work, TimeSpan? timeout = null)
     {
@@ -55,8 +59,14 @@ internal static class MainThread
         }
 
         var completion = new TaskCompletionSource<T>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var state = new WorkState();
         Queue.Enqueue(() =>
         {
+            if (!state.TryStart())
+            {
+                return;
+            }
+
             try
             {
                 completion.TrySetResult(work());
@@ -67,13 +77,28 @@ internal static class MainThread
             }
         });
 
-        var finished = await Task.WhenAny(completion.Task, Task.Delay(timeout ?? TimeSpan.FromSeconds(10)));
-        if (finished != completion.Task)
+        var finished = await Task.WhenAny(completion.Task, Task.Delay(timeout ?? DefaultTimeout));
+        if (finished != completion.Task && state.TryAbandon())
         {
             throw new TimeoutException("The game's main thread did not pick up the work (is the game frozen?)");
         }
 
+        // Either it finished, or the main thread started it just as the wait ran out; it finishes within the frame
         return await completion.Task;
+    }
+
+    /// <summary>How long callers wait by default for the main thread to pick up work.</summary>
+    public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(10);
+
+    /// <summary>Whether queued work was started by the main thread or abandoned by its caller; whichever comes first wins.</summary>
+    private sealed class WorkState
+    {
+        private const int Queued = 0, Started = 1, Abandoned = 2;
+        private int _value = Queued;
+
+        public bool TryStart() => Interlocked.CompareExchange(ref _value, Started, Queued) == Queued;
+
+        public bool TryAbandon() => Interlocked.CompareExchange(ref _value, Abandoned, Queued) == Queued;
     }
 
     public static Task RunAsync(Action work, TimeSpan? timeout = null) =>

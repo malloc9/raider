@@ -3,8 +3,12 @@ namespace Raider.Plugin.Chores;
 using static Raider.Plugin.Game.Il2CppReflection;
 
 /// <summary>
-/// Claim quests: collects every completed quest reward on the Daily, Weekly, Monthly and Advanced tabs, plus the
-/// Daily and Weekly progress chests.
+/// Claim quests: collects every completed quest reward on the Daily, Weekly, Monthly and Advanced tabs.
+/// <para>
+/// Not yet: the Daily and Weekly progress chests. Raid 11.95's interop has no command named for them (only
+/// <c>DailyQuestPoints</c> / <c>WeeklyQuestPoints</c> resources), so how the game claims them is not mapped; they
+/// may already arrive as QuestStates above, but that is unverified against a live game.
+/// </para>
 /// <para>
 /// Game side, two sources:
 /// <list type="bullet">
@@ -31,7 +35,8 @@ internal sealed class ClaimQuestsChoreHandler : IChoreHandler
     private static ChorePlan Plan(object userWrapper)
     {
         var commands = new List<PlannedCommand>();
-        var planned = new HashSet<int>();
+        // Periodic quests and QuestStates are separate ID spaces with separate commands; dedupe within each only
+        var planned = new HashSet<(string Kind, int QuestId)>();
 
         var periodicData = Get(GetRequired(userWrapper, "PeriodicQuests"), "PeriodicData");
         foreach (var group in Items(periodicData == null ? null : Get(periodicData, "Groups")))
@@ -45,7 +50,7 @@ internal sealed class ClaimQuestsChoreHandler : IChoreHandler
                 }
 
                 var questId = Convert.ToInt32(Get(quest, "QuestId"));
-                if (planned.Add(questId))
+                if (planned.Add(("Periodic", questId)))
                 {
                     commands.Add(new PlannedCommand(ClaimPeriodic, new object?[] { questId }, new { questId, tab, kind = "Periodic" }));
                 }
@@ -69,7 +74,7 @@ internal sealed class ClaimQuestsChoreHandler : IChoreHandler
                 continue;
             }
 
-            if (planned.Add(questId))
+            if (planned.Add(("Quest", questId)))
             {
                 commands.Add(new PlannedCommand(ClaimQuest, new object?[] { questId }, new { questId, tab = category, kind = "Quest" }));
             }

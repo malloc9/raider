@@ -20,14 +20,22 @@ internal sealed record PlannedCommand(
 /// issue them one at a time and report what happened.
 /// <para>
 /// Outcome contract (read by Raider's PluginGamePort): <c>Success</c> true with data.outcome "Success" or
-/// "NothingToDo"; <c>Success</c> false with an error message when nothing planned could be done.
+/// "NothingToDo"; <c>Success</c> false with an error message when nothing planned could be done, or when nothing
+/// was confirmed done (commands the server did not answer in time are listed as <c>unconfirmed</c>: the game may
+/// still have applied them).
 /// Passing <c>{"dryRun": true}</c> as a parameter returns the plan without issuing any command.
 /// </para>
 /// </summary>
 internal static class ChoreRun
 {
-    /// <summary>Stop starting commands after this, so Raider's 60 s request timeout is not hit.</summary>
-    private static readonly TimeSpan Budget = TimeSpan.FromSeconds(45);
+    /// <summary>
+    /// The whole Chore, planning included, ends within this, so Raider's 60 s request timeout (PluginGamePort) is
+    /// not hit; the rest is left for answering the request.
+    /// </summary>
+    private static readonly TimeSpan Deadline = TimeSpan.FromSeconds(55);
+
+    /// <summary>No command is started with less time than this left before the deadline.</summary>
+    private static readonly TimeSpan MinimumCommandTime = TimeSpan.FromSeconds(5);
 
     /// <summary>
     /// Runs a Chore: <paramref name="plan"/> runs on the main thread against the player's UserWrapper and returns
@@ -39,6 +47,7 @@ internal static class ChoreRun
         Func<object, ChorePlan> plan)
     {
         var log = RaiderPlugin.Log;
+        var deadline = DateTime.UtcNow + Deadline;
         try
         {
             log.LogInfo($"{choreName}: starting");
@@ -78,39 +87,56 @@ internal static class ChoreRun
                 });
             }
 
-            var started = DateTime.UtcNow;
             var done = new List<PlannedCommand>();
             var failed = new List<Unfinished>();
             var skipped = new List<Unfinished>();
+            var unconfirmed = new List<Unfinished>();
             var notAttempted = 0;
             foreach (var command in chorePlan.Commands)
             {
-                if (DateTime.UtcNow - started > Budget)
+                var timeLeft = deadline - DateTime.UtcNow;
+                if (timeLeft < MinimumCommandTime)
                 {
                     notAttempted++;
                     continue;
                 }
 
-                var result = await GameCommands.RunAsync(command.CommandType, command.Args, command.Precheck);
-                if (result.Succeeded)
+                var result = await GameCommands.RunAsync(command.CommandType, command.Args, timeLeft, command.Precheck);
+                switch (result.Status)
                 {
-                    done.Add(command);
-                }
-                else if (result.WasSkipped)
-                {
-                    skipped.Add(new Unfinished(command.Item, result.Error));
-                }
-                else
-                {
-                    failed.Add(new Unfinished(command.Item, result.Error));
+                    case CommandStatus.Ok:
+                        done.Add(command);
+                        break;
+                    case CommandStatus.Skipped:
+                        skipped.Add(new Unfinished(command.Item, result.Error));
+                        break;
+                    case CommandStatus.Unconfirmed:
+                        unconfirmed.Add(new Unfinished(command.Item, result.Error));
+                        break;
+                    default:
+                        failed.Add(new Unfinished(command.Item, result.Error));
+                        break;
                 }
             }
 
-            log.LogInfo($"{choreName}: {done.Count} done, {failed.Count} failed, {skipped.Count} skipped, {notAttempted} left for next time");
+            log.LogInfo($"{choreName}: {done.Count} done, {failed.Count} failed, {unconfirmed.Count} unconfirmed, " +
+                        $"{skipped.Count} skipped, {notAttempted} left for next time");
 
             if (done.Count == 0 && failed.Count > 0)
             {
-                return Fail(log, choreName, $"Nothing could be done: {failed[0].Reason}", new { failed, skipped });
+                return Fail(log, choreName, $"Nothing could be done: {failed[0].Reason}", new { failed, unconfirmed, skipped });
+            }
+
+            if (done.Count == 0 && unconfirmed.Count > 0)
+            {
+                return Fail(log, choreName,
+                    $"Nothing was confirmed done, but {unconfirmed.Count} command(s) may have gone through: {unconfirmed[0].Reason}",
+                    new { unconfirmed, skipped });
+            }
+
+            if (done.Count == 0 && notAttempted > 0)
+            {
+                return Fail(log, choreName, $"Ran out of time before starting any of {notAttempted} command(s)");
             }
 
             if (done.Count == 0)
@@ -129,6 +155,7 @@ internal static class ChoreRun
                 outcome = "Success",
                 done = done.Select(c => c.Item),
                 failed,
+                unconfirmed,
                 skipped,
                 notAttempted,
                 gemsCollected = done.Sum(c => c.Gems)

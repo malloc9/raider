@@ -13,7 +13,7 @@ using static Raider.Plugin.Game.Il2CppReflection;
 /// </para>
 /// <para>
 /// Spending guard: an item counts as free only if its price reads as empty with zero silver, zero gems and no
-/// non-zero resource at all; anything unreadable counts as not free. The price is read again on the main thread
+/// non-zero resource at all; anything unreadable, a missing (null) price included, counts as not free. The price is read again on the main thread
 /// immediately before the buy command is created.
 /// </para>
 /// </summary>
@@ -90,9 +90,10 @@ internal sealed class BuyFreeMarketItemsChoreHandler : IChoreHandler
 
     private static bool IsFree(object? price)
     {
+        // No price at all is unreadable, not free: a game update that moves the price must not make everything free
         if (price == null)
         {
-            return true;
+            return false;
         }
 
         try
