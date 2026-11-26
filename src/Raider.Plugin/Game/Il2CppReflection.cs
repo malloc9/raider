@@ -110,7 +110,10 @@ internal static class Il2CppReflection
         }
 
         var type = collection.GetType();
-        var indexer = type.GetMethod("get_Item", new[] { typeof(int) });
+        // A dictionary keyed by int also has get_Item(int), but that takes a key, not a position,
+        // so only real lists may be walked by index
+        var isDictionary = type.GetMethod("ContainsKey") != null;
+        var indexer = isDictionary ? null : type.GetMethod("get_Item", new[] { typeof(int) });
         if (indexer != null && type.GetProperty("Count") is { } countProperty)
         {
             var count = Convert.ToInt32(countProperty.GetValue(collection));
