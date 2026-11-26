@@ -130,7 +130,7 @@ internal sealed class ChoreExecutor
         {
             Success = result.Success,
             ErrorMessage = result.ErrorMessage,
-            GemsCollected = result.Data is int gems ? gems : 0,
+            GemsCollected = result.Data?.GetType().GetProperty("gemsCollected")?.GetValue(result.Data) is int gems ? gems : 0,
             Data = result.Data
         };
 

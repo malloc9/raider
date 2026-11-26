@@ -117,21 +117,13 @@ public static class GameAccess
     }
 
     /// <summary>
-    /// Not mapped to Raid's real types yet; always -1 (failure).
+    /// The logged-in player's game state (AppModel._userWrapper, a Client.Model.Guard.UserWrapper), or null while no
+    /// player is logged in. Read it on the main thread (<see cref="MainThread"/>) when acting on it.
     /// </summary>
-    public static int GetAccumulatedGems()
+    public static object? GetUserWrapper()
     {
-        _logger?.LogWarning("Gem Mine is not mapped to Raid's game types yet");
-        return -1;
-    }
-
-    /// <summary>
-    /// Not mapped to Raid's real types yet; always -1 (failure).
-    /// </summary>
-    public static int CollectGemMine()
-    {
-        _logger?.LogWarning("Gem Mine is not mapped to Raid's game types yet");
-        return -1;
+        var appModel = GetAppModel();
+        return appModel == null ? null : Il2CppReflection.Get(appModel, "_userWrapper");
     }
 
     private static bool TryInitialize()
@@ -187,7 +179,7 @@ public static class GameAccess
     /// <summary>
     /// Finds a type in Raid's interop assemblies (the ones BepInEx generated from the game, named Unity.*).
     /// </summary>
-    private static Type? FindGameType(string fullName)
+    internal static Type? FindGameType(string fullName)
     {
         foreach (var assembly in AppDomain.CurrentDomain.GetAssemblies())
         {
@@ -205,7 +197,7 @@ public static class GameAccess
         }
 
         // Interop assemblies load lazily; Raid keeps its app layer in these
-        foreach (var assemblyName in new[] { "Unity.Model", "Unity.App" })
+        foreach (var assemblyName in new[] { "Unity.Model", "Unity.App", "Unity.SharedModel" })
         {
             try
             {
