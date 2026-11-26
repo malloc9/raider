@@ -164,7 +164,12 @@
                                                     Background="#A4262C" Foreground="White" BorderThickness="0"
                                                     Padding="8,2" FontSize="12" Margin="0,0,4,0" />
                                             <Button DockPanel.Dock="Right" Content="Rename"
-                                                    Command="{Binding RenameCommand}" 
+                                                    Command="{Binding RenameCommand}"
+                                                    Padding="8,2" FontSize="12" Margin="0,0,4,0" />
+                                            <Button DockPanel.Dock="Right" Content="Run now"
+                                                    Command="{Binding DataContext.RunAccountCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Background="#0078D4" Foreground="White" BorderThickness="0"
                                                     Padding="8,2" FontSize="12" Margin="0,0,4,0" />
                                             <StackPanel VerticalAlignment="Center">
                                                 <TextBlock>
@@ -188,6 +193,9 @@
                                                 </DataTemplate>
                                             </ItemsControl.ItemTemplate>
                                         </ItemsControl>
+                                        <!-- Result of this Account's last Run, one line per Chore -->
+                                        <TextBlock Text="{Binding Status}" Margin="0,4,0,0" FontSize="12"
+                                                   Foreground="#444444" TextWrapping="Wrap" />
                                     </StackPanel>
                                 </Border>
                             </DataTemplate>

@@ -4,6 +4,7 @@ using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Microsoft.Extensions.Logging;
 using Raider.Core.Models;
+using Raider.Core.Ports;
 using Raider.Core.Services;
 using System.Collections.ObjectModel;
 using System.IO;
@@ -18,6 +19,8 @@ public sealed partial class InstancesAndAccountsViewModel : ObservableObject
     private readonly IInstanceDetectionService _instanceDetectionService;
     private readonly IAccountStore _accountStore;
     private readonly RunOrchestrator _runOrchestrator;
+    private readonly IGameDetectionService _gameDetectionService;
+    private readonly PluginConnection _pluginConnection;
     private readonly ILogger<InstancesAndAccountsViewModel> _logger;
     private CancellationTokenSource? _refreshCts;
     private readonly object _instancesLock = new();
@@ -26,8 +29,12 @@ public sealed partial class InstancesAndAccountsViewModel : ObservableObject
         IInstanceDetectionService instanceDetectionService,
         IAccountStore accountStore,
         RunOrchestrator runOrchestrator,
+        IGameDetectionService gameDetectionService,
+        PluginConnection pluginConnection,
         ILogger<InstancesAndAccountsViewModel> logger)
     {
+        _gameDetectionService = gameDetectionService;
+        _pluginConnection = pluginConnection;
         _instanceDetectionService = instanceDetectionService;
         _accountStore = accountStore;
         _runOrchestrator = runOrchestrator;
@@ -53,7 +60,7 @@ public sealed partial class InstancesAndAccountsViewModel : ObservableObject
     public ObservableCollection<string> LogEntries { get; }
 
     [ObservableProperty]
-    [NotifyCanExecuteChangedFor(nameof(RunAllInstancesCommand))]
+    [NotifyCanExecuteChangedFor(nameof(RunAllInstancesCommand), nameof(RunAccountCommand))]
     private bool _isRunningAny;
 
     /// <summary>
@@ -61,9 +68,35 @@ public sealed partial class InstancesAndAccountsViewModel : ObservableObject
     /// </summary>
     public async Task InitializeAsync()
     {
+        await LoadPluginTokenAsync();
         await LoadAccountsAsync();
         await RefreshInstancesAsync();
         StartPeriodicRefresh();
+    }
+
+    /// <summary>
+    /// Reads the per-install token from the game folder so requests to the plugin are authorized.
+    /// Never creates one: a new token only takes effect once the plugin is (re)installed.
+    /// </summary>
+    private async Task LoadPluginTokenAsync()
+    {
+        try
+        {
+            var game = await _gameDetectionService.FindGameInstallationAsync();
+            var tokenPath = game == null ? null : Path.Combine(game.GamePath, "raider.token");
+            if (tokenPath == null || !File.Exists(tokenPath))
+            {
+                AddLog("No plugin token found; install the plugin first");
+                return;
+            }
+
+            _pluginConnection.Token = (await File.ReadAllTextAsync(tokenPath)).Trim();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Error reading plugin token");
+            AddLog($"Could not read the plugin token: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -253,6 +286,69 @@ public sealed partial class InstancesAndAccountsViewModel : ObservableObject
             }
         }, _refreshCts.Token);
     }
+
+    private bool CanRunAccount(AccountItemViewModel? item) => !IsRunningAny;
+
+    /// <summary>
+    /// Runs one Account's ticked Chores in the most recently started game, whichever Account is logged in there.
+    /// </summary>
+    [RelayCommand(CanExecute = nameof(CanRunAccount))]
+    private async Task RunAccountAsync(AccountItemViewModel? item)
+    {
+        if (item == null)
+            return;
+
+        var account = item.ToAccount();
+        if (account.Routine.Chores.Count == 0)
+        {
+            item.Status = "No Chores ticked";
+            return;
+        }
+
+        IsRunningAny = true;
+        item.Status = "Running...";
+        StatusMessage = $"Running {account.Routine.Chores.Count} Chore(s) for {item.DisplayName}...";
+        var logDirectory = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "Raider", "logs", DateTime.Now.ToString("yyyyMMdd-HHmmss"), item.Id);
+
+        try
+        {
+            var run = await _runOrchestrator.ExecuteRunAsync(account, logDirectory);
+            item.Status = string.Join(Environment.NewLine, run.Results.Select(DescribeResult));
+            StatusMessage = $"{item.DisplayName}: {run.SuccessCount} ok, {run.FailureCount} failed";
+            AddLog(StatusMessage);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Run failed");
+            item.Status = $"Run failed: {ex.Message}";
+            StatusMessage = item.Status;
+        }
+        finally
+        {
+            IsRunningAny = false;
+        }
+    }
+
+    /// <summary>One line per Chore: its outcome, plus the plugin's reason when it had nothing to do.</summary>
+    private static string DescribeResult(ChoreResult result)
+    {
+        if (result.IsFailure)
+            return $"✗ {result.Chore.Name}: {result.ErrorMessage}";
+
+        var outcome = ReadString(result.Data, "outcome");
+        var reason = ReadString(result.Data, "reason");
+        return outcome == "NothingToDo"
+            ? $"– {result.Chore.Name}: nothing to do{(reason != null ? $" ({reason})" : "")}"
+            : $"✓ {result.Chore.Name}: done";
+    }
+
+    private static string? ReadString(object? data, string name) =>
+        data is System.Text.Json.JsonElement { ValueKind: System.Text.Json.JsonValueKind.Object } json
+        && json.TryGetProperty(name, out var value) && value.ValueKind == System.Text.Json.JsonValueKind.String
+            ? value.GetString()
+            : null;
 
     [RelayCommand]
     private async Task RemoveAccountAsync(AccountItemViewModel? item)
